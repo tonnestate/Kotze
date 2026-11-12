@@ -36,6 +36,15 @@ static int step_done(kotze_dispatch_t *d, sqlite3_stmt *s) {
     sqlite3_finalize(s);
     return rc == SQLITE_DONE ? KD_OK : fail(d, KD_ERROR, sqlite3_errmsg(d->db));
 }
+static int record_change(kotze_dispatch_t *d, const char *id, int64_t token,
+                         const char *change, const char *receipt) {
+    sqlite3_stmt *s=NULL;
+    int rc=query(d,&s,"INSERT INTO effect_dispatch_history(action_id,token,transition,receipt_ref) "
+                      "VALUES(?,?,?,?)");
+    if(rc<0)return rc;
+    bind(s,1,id);sqlite3_bind_int64(s,2,token);bind(s,3,change);bind(s,4,receipt);
+    return step_done(d,s);
+}
 
 int kd_open(kotze_dispatch_t **out, const char *db_path) {
     if (!out || !valid(db_path, 4096)) return KD_DENIED;
@@ -58,7 +67,12 @@ int kd_open(kotze_dispatch_t **out, const char *db_path) {
         "state TEXT NOT NULL CHECK(state IN ('PENDING','DISPATCHING','UNKNOWN','CONFIRMED','FAILED')) DEFAULT 'PENDING',"
         "token INTEGER NOT NULL DEFAULT 0 CHECK(token >= 0),"
         "receipt_ref TEXT NOT NULL DEFAULT '');"
-        "CREATE INDEX IF NOT EXISTS idx_effect_dispatch_work ON effect_dispatch(work_id,state);";
+        "CREATE INDEX IF NOT EXISTS idx_effect_dispatch_work ON effect_dispatch(work_id,state);"
+        "CREATE TABLE IF NOT EXISTS effect_dispatch_history ("
+        "seq INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "action_id TEXT NOT NULL REFERENCES effect_dispatch(action_id),"
+        "token INTEGER NOT NULL, transition TEXT NOT NULL,"
+        "receipt_ref TEXT NOT NULL);";
     if (sqlite3_exec(d->db, ddl, NULL, NULL, NULL) != SQLITE_OK) {
         sqlite3_close(d->db);
         free(d);
@@ -113,6 +127,7 @@ int kd_reserve(kotze_dispatch_t *d, const char *action_id, const char *key) {
     rc=step_done(d,s);
     if(rc<0 && sqlite3_errcode(d->db)==SQLITE_CONSTRAINT)
         rc=fail(d,KD_CONFLICT,"effect key already belongs to another action");
+    if(rc==KD_OK)rc=record_change(d,action_id,0,"RESERVED","");
     return finish_tx(d,rc);
 }
 
@@ -121,16 +136,22 @@ int kd_claim(kotze_dispatch_t *d, const char *id, int64_t *token) {
     if (tx(d)<0) return KD_ERROR;
     sqlite3_stmt *s=NULL;
     int rc=query(d,&s,"UPDATE effect_dispatch SET state='DISPATCHING',token=token+1 "
-                      "WHERE action_id=? AND state='PENDING' RETURNING token");
+                      "WHERE action_id=? AND state='PENDING' "
+                      "AND EXISTS(SELECT 1 FROM works w JOIN effect_dispatch e "
+                      "ON e.work_id=w.id WHERE e.action_id=? "
+                      "AND w.state NOT IN ('BLOCKED','RECOVERING','COMPLETED',"
+                      "'RESOLVED_NO_DEFECT','AWAITING_CLARIFICATION') "
+                      "AND w.effect_state!='UNKNOWN') RETURNING token");
     if(rc<0)return finish_tx(d,rc);
-    bind(s,1,id);
+    bind(s,1,id);bind(s,2,id);
     int step=sqlite3_step(s);
-    if(step!=SQLITE_ROW){sqlite3_finalize(s);return finish_tx(d,fail(d,step==SQLITE_DONE?KD_DENIED:KD_ERROR,"effect not pending"));}
+    if(step!=SQLITE_ROW){sqlite3_finalize(s);return finish_tx(d,fail(d,step==SQLITE_DONE?KD_DENIED:KD_ERROR,"effect not pending or work blocked"));}
     int64_t next=sqlite3_column_int64(s,0);
     step=sqlite3_step(s);
     sqlite3_finalize(s);
     if(step!=SQLITE_DONE)return finish_tx(d,fail(d,KD_ERROR,"claim returned inconsistent row count"));
-    rc=finish_tx(d,KD_OK);
+    rc=record_change(d,id,next,"CLAIMED","");
+    rc=finish_tx(d,rc);
     if(rc==KD_OK)*token=next;
     return rc;
 }
@@ -159,6 +180,7 @@ int kd_finish(kotze_dispatch_t *d,const char *id,int64_t token,
     rc=query(d,&s,"UPDATE actions SET state='FINISHED',outcome_digest=? WHERE action_id=? AND state='RESERVED'");
     if(rc<0)return finish_tx(d,rc);
     bind(s,1,receipt);bind(s,2,id);rc=step_done(d,s);
+    if(rc==KD_OK)rc=record_change(d,id,token,outcome,receipt);
     return finish_tx(d,rc);
 }
 
@@ -179,7 +201,9 @@ int kd_unknown(kotze_dispatch_t *d,const char *id,int64_t token){
     rc=query(d,&s,"UPDATE effect_dispatch SET state='UNKNOWN' WHERE action_id=? AND token=?");
     if(rc<0)return finish_tx(d,rc);
     bind(s,1,id);sqlite3_bind_int64(s,2,token);
-    return finish_tx(d,step_done(d,s));
+    rc=step_done(d,s);
+    if(rc==KD_OK)rc=record_change(d,id,token,"UNKNOWN","");
+    return finish_tx(d,rc);
 }
 
 int kd_reconcile(kotze_dispatch_t *d,const char *id,const char *resolution,const char *receipt){
@@ -187,12 +211,13 @@ int kd_reconcile(kotze_dispatch_t *d,const char *id,const char *resolution,const
        !(resolution&&(!strcmp(resolution,"CONFIRMED")||!strcmp(resolution,"NOT_EXECUTED"))))return KD_DENIED;
     if(tx(d)<0)return KD_ERROR;
     sqlite3_stmt *s=NULL;
-    int rc=query(d,&s,"SELECT state FROM effect_dispatch WHERE action_id=?");
+    int rc=query(d,&s,"SELECT state,token FROM effect_dispatch WHERE action_id=?");
     if(rc<0)return finish_tx(d,rc);
     bind(s,1,id);
     int step=sqlite3_step(s);
     if(step!=SQLITE_ROW){sqlite3_finalize(s);return finish_tx(d,fail(d,KD_DENIED,"unknown effect"));}
     int unknown=eq(sqlite3_column_text(s,0),"UNKNOWN");
+    int64_t token=sqlite3_column_int64(s,1);
     sqlite3_finalize(s);
     if(!unknown)return finish_tx(d,fail(d,KD_CONFLICT,"effect is not UNKNOWN"));
     const char *next=!strcmp(resolution,"CONFIRMED")?"CONFIRMED":"PENDING";
@@ -205,6 +230,7 @@ int kd_reconcile(kotze_dispatch_t *d,const char *id,const char *resolution,const
         if(rc<0)return finish_tx(d,rc);
         bind(s,1,receipt);bind(s,2,id);rc=step_done(d,s);
     }
+    if(rc==KD_OK)rc=record_change(d,id,token,resolution,receipt);
     return finish_tx(d,rc);
 }
 

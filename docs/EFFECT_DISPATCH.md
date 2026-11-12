@@ -61,3 +61,15 @@ reconciliation and persisted action result.
 Updated tests/test_core.c exercise the core completion gate while an effect is
 UNKNOWN and the confirmed recovery path. Run locally with make check. No CI
 workflow, external model, hosted test runner or network dependency is needed.
+
+## Forensic trace and late authorization
+
+All effect state transitions are appended to `effect_dispatch_history` with
+monotonic `seq`, claim `token`, transition name and a receipt reference. A later
+reconciliation does not erase the earlier UNKNOWN event or its absence proof.
+The host must itself protect this journal from untrusted worker processes.
+
+The claim operation re-checks the authoritative `works.state` and
+`works.effect_state` at dispatch time. An action reserved before the work was
+BLOCKED, RECOVERING or AWAITING_CLARIFICATION cannot be claimed after that
+state change. Test coverage includes this case and immutable recovery history.
