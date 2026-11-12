@@ -87,15 +87,15 @@ int main(void){
     assert(kd_unknown(d,"action-1",token)==KD_OK);
     assert(kd_claim(d,"action-1",&token)==KD_DENIED);
 
-    move(k,"work-1","e7","CANDIDATE_SEALED",KOTZE_CONTROLLER,"diff-receipt","candidate-01",NULL,NULL);
-    kotze_event premature=make_event(k,"work-1","premature","VERIFY_PASS",
-        KOTZE_VERIFIER,"unsupported","candidate-01","oracle-hash-1",NULL);
+    kotze_event premature=make_event(k,"work-1","premature","CANDIDATE_SEALED",
+        KOTZE_CONTROLLER,"unsupported","candidate-01",NULL,NULL);
     STATUS(kotze_apply_event(k,&premature),KOTZE_DENIED);
     assert(kd_reconcile(d,"action-1","NOT_EXECUTED","absence-evidence")==KD_OK);
     assert(kd_claim(d,"action-1",&token)==KD_OK && token==2);
     assert(kd_finish(d,"action-1",token,"CONFIRMED","verified-dispatch-receipt")==KD_OK);
     assert(kd_work_settled(d,"work-1")==KD_OK);
     kd_close(d);
+    move(k,"work-1","e7","CANDIDATE_SEALED",KOTZE_CONTROLLER,"diff-receipt","candidate-01",NULL,NULL);
     STATUS(kotze_finish_action(k,"action-1","verified-dispatch-receipt"),KOTZE_REPLAY);
     STATUS(kotze_finish_action(k,"action-1","result-fake"),KOTZE_CONFLICT);
     check_state(k,"work-1","VERIFYING");
@@ -105,6 +105,17 @@ int main(void){
     STATUS(kotze_apply_event(k,&bad),KOTZE_DENIED);
     move(k,"work-1","e8","VERIFY_PASS",KOTZE_VERIFIER,"independent-receipt","candidate-01","oracle-hash-1",NULL);
     check_state(k,"work-1","DELIVERING");
+    OK(kotze_admit_action(k,"work-1","pr-action","NETWORK","publish PR","local-env",0));
+    assert(kd_open(&d,filename)==KD_OK);
+    assert(kd_reserve(d,"pr-action","pr-idempotency-key")==KD_OK);
+    assert(kd_claim(d,"pr-action",&token)==KD_OK);
+    assert(kd_unknown(d,"pr-action",token)==KD_OK);
+    kotze_event early_delivery=make_event(k,"work-1","early-delivery","DELIVERY_CONFIRMED",
+        KOTZE_VERIFIER,"no-receipt",NULL,NULL,NULL);
+    STATUS(kotze_apply_event(k,&early_delivery),KOTZE_DENIED);
+    assert(kd_reconcile(d,"pr-action","CONFIRMED","remote-pr-found")==KD_OK);
+    assert(kd_work_settled(d,"work-1")==KD_OK);
+    kd_close(d);
     STATUS(kotze_record_success(k,"work-1","git-correct-route","local-env","receipt-01"),KOTZE_DENIED);
     move(k,"work-1","e9","DELIVERY_CONFIRMED",KOTZE_VERIFIER,"pr-confirmed",NULL,NULL,NULL);
     check_state(k,"work-1","COMPLETED");

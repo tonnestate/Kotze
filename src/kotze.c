@@ -248,8 +248,8 @@ int kotze_apply_event(kotze_t *k,const kotze_event *e) {
     if(e->contract_hash && e->contract_hash[0] && !eq(e->name,"ANSWER_ACCEPTED") && !eq(e->contract_hash,v.contract_hash))
         return commit(k,fail(k,KOTZE_CONFLICT,"Contract hash mismatch"));
     if(terminal(v.state))return commit(k,fail(k,KOTZE_DENIED,"Terminal work is immutable"));
-    if(eq(e->name,"VERIFY_PASS") || eq(e->name,"DELIVERY_CONFIRMED") ||
-       eq(e->name,"NO_DEFECT_PROVEN")) {
+    if(eq(e->name,"CANDIDATE_SEALED") || eq(e->name,"VERIFY_PASS") ||
+       eq(e->name,"DELIVERY_CONFIRMED") || eq(e->name,"NO_DEFECT_PROVEN")) {
         rc=effects_settled(k,e->work_id);
         if(rc<0)return commit(k,rc==KOTZE_ERROR?rc:
             fail(k,KOTZE_DENIED,"Unresolved external action blocks completion"));

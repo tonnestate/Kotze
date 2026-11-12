@@ -73,3 +73,15 @@ The claim operation re-checks the authoritative `works.state` and
 `works.effect_state` at dispatch time. An action reserved before the work was
 BLOCKED, RECOVERING or AWAITING_CLARIFICATION cannot be claimed after that
 state change. Test coverage includes this case and immutable recovery history.
+
+## Candidate sealing and delivery
+
+CANDIDATE_SEALED is blocked until earlier WRITE/NETWORK actions have
+a confirmed effect disposition. An outstanding edit can no longer race a
+sealed candidate. WRITE claims are additionally denied if the active
+work phase is no longer REPAIRING. After VERIFY_PASS, a DELIVERY-stage
+NETWORK operation such as publishing a PR is tracked separately;
+DELIVERY_CONFIRMED is blocked until the remote effect is reconciled.
+
+This does **not** imply remote exactly-once delivery without a provider-level
+idempotency key or a trustworthy remote existence check.

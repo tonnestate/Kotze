@@ -141,7 +141,9 @@ int kd_claim(kotze_dispatch_t *d, const char *id, int64_t *token) {
                       "ON e.work_id=w.id WHERE e.action_id=? "
                       "AND w.state NOT IN ('BLOCKED','RECOVERING','COMPLETED',"
                       "'RESOLVED_NO_DEFECT','AWAITING_CLARIFICATION') "
-                      "AND w.effect_state!='UNKNOWN') RETURNING token");
+                      "AND w.effect_state!='UNKNOWN' "
+                      "AND (e.action_id NOT IN (SELECT action_id FROM actions WHERE operation='WRITE') "
+                      "OR w.state='REPAIRING')) RETURNING token");
     if(rc<0)return finish_tx(d,rc);
     bind(s,1,id);bind(s,2,id);
     int step=sqlite3_step(s);
