@@ -108,4 +108,34 @@ int kotze_find_success(kotze_t *k, const char *capability_key,
                        const char *environment_digest,
                        char *receipt_ref, size_t capacity);
 
+
+/* Evidence-labelled repair memory. Inputs are supplied by a trusted host, not
+ * by untrusted model output. A verifier role in the current C ABI is not OS
+ * authentication: counts describe verifier-REPORTED results, not certified
+ * independent results until the external host security boundary exists.
+ */
+typedef struct {
+    const char *episode_id;
+    const char *work_id;
+    const char *capability_key;
+    const char *environment_digest;
+    const char *context_digest;
+    const char *failure_class;
+    const char *strategy_key;
+    const char *verifier_event_id; /* existing immutable VERIFY_PASS/VERIFY_FAIL event */
+} kotze_repair_episode;
+
+typedef struct {
+    uint64_t verifier_reported_pass;
+    uint64_t verifier_reported_fail;
+} kotze_repair_stats;
+
+/* Record one immutable episode per verifier event, replay-safe. */
+int kotze_record_repair_episode(kotze_t *k, const kotze_repair_episode *episode);
+/* Exact, comparable cohort only; never an automatic permission to execute. */
+int kotze_get_repair_stats(kotze_t *k, const char *capability_key,
+                           const char *environment_digest, const char *context_digest,
+                           const char *failure_class, const char *strategy_key,
+                           kotze_repair_stats *out);
+
 #endif

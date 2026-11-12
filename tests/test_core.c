@@ -97,6 +97,44 @@ int main(void){
     OK(kotze_find_success(k,"git-correct-route","local-env",receipt,sizeof(receipt)));
     assert(strcmp(receipt,"receipt-01")==0);
 
+
+    /* Repair memory: only stored verifier events, exact replay, no double-count.
+     * The verifier role here remains a cooperative CLI/API convention.
+     */
+    kotze_repair_episode ep_pass={"ep-1","work-1","unit-calculation","environment-v1",
+        "context-v1","CONSTRAINT_VIOLATION","minimal-formula-repair","e8"};
+    OK(kotze_record_repair_episode(k,&ep_pass));
+    STATUS(kotze_record_repair_episode(k,&ep_pass),KOTZE_REPLAY);
+    kotze_repair_episode ep_wrong=ep_pass;ep_wrong.strategy_key="rewrite-all";
+    STATUS(kotze_record_repair_episode(k,&ep_wrong),KOTZE_CONFLICT);
+    ep_wrong=ep_pass;ep_wrong.episode_id="ep-duplicate";
+    STATUS(kotze_record_repair_episode(k,&ep_wrong),KOTZE_CONFLICT);
+    ep_wrong=ep_pass;ep_wrong.episode_id="ep-unverified";
+    ep_wrong.verifier_event_id="e7"; /* controller candidate seal, not verifier */
+    STATUS(kotze_record_repair_episode(k,&ep_wrong),KOTZE_DENIED);
+    ep_wrong.verifier_event_id="does-not-exist";
+    STATUS(kotze_record_repair_episode(k,&ep_wrong),KOTZE_DENIED);
+
+    kotze_work_spec retry=spec("repair-failed","AUTO",0,8);
+    OK(kotze_create_work(k,&retry));
+    move(k,"repair-failed","f1","CONTRACT_VALID",KOTZE_CONTROLLER,"agreed",NULL,NULL,NULL);
+    move(k,"repair-failed","f2","BUG_REPRODUCED",KOTZE_VERIFIER,"repro",NULL,"oracle-f",NULL);
+    move(k,"repair-failed","f3","CAUSE_SUPPORTED",KOTZE_CONTROLLER,"cause",NULL,NULL,NULL);
+    move(k,"repair-failed","f4","PLAN_AUTHORIZED",KOTZE_CONTROLLER,"plan",NULL,NULL,NULL);
+    move(k,"repair-failed","f5","CANDIDATE_SEALED",KOTZE_CONTROLLER,"artifact","candidate-f",NULL,NULL);
+    move(k,"repair-failed","f6","VERIFY_FAIL",KOTZE_VERIFIER,"violation","candidate-f","oracle-f",NULL);
+    check_state(k,"repair-failed","DIAGNOSING");
+    kotze_repair_episode ep_fail={"ep-2","repair-failed","unit-calculation","environment-v1",
+        "context-v1","CONSTRAINT_VIOLATION","minimal-formula-repair","f6"};
+    OK(kotze_record_repair_episode(k,&ep_fail));
+    kotze_repair_stats stats={0};
+    OK(kotze_get_repair_stats(k,"unit-calculation","environment-v1","context-v1",
+        "CONSTRAINT_VIOLATION","minimal-formula-repair",&stats));
+    assert(stats.verifier_reported_pass==1 && stats.verifier_reported_fail==1);
+    OK(kotze_get_repair_stats(k,"unit-calculation","environment-v2","context-v1",
+        "CONSTRAINT_VIOLATION","minimal-formula-repair",&stats));
+    assert(stats.verifier_reported_pass==0 && stats.verifier_reported_fail==0);
+
     kotze_work_spec nod=spec("no-defect","AUTO",0,1);OK(kotze_create_work(k,&nod));
     move(k,"no-defect","n1","CONTRACT_VALID",KOTZE_CONTROLLER,"domain-valid",NULL,NULL,NULL);
     move(k,"no-defect","n2","NO_DEFECT_PROVEN",KOTZE_VERIFIER,"baseline-and-expectation-proof",NULL,NULL,NULL);
@@ -128,6 +166,10 @@ int main(void){
     OK(kotze_open(&k,filename));
     check_state(k,"work-1","COMPLETED");
     OK(kotze_find_success(k,"git-correct-route","local-env",receipt,sizeof(receipt)));
+    OK(kotze_get_repair_stats(k,"unit-calculation","environment-v1","context-v1",
+        "CONSTRAINT_VIOLATION","minimal-formula-repair",&stats));
+    assert(stats.verifier_reported_pass==1 && stats.verifier_reported_fail==1);
+    STATUS(kotze_record_repair_episode(k,&ep_pass),KOTZE_REPLAY);
     OK(kotze_next_option(k,"work-1",next,sizeof(next)));
     assert(strcmp(next,"hyp-5")==0);
     kotze_close(k);

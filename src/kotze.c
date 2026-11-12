@@ -95,7 +95,19 @@ int kotze_open(kotze_t **out, const char *db_file) {
         " candidate_sha TEXT NOT NULL, receipt_ref TEXT NOT NULL,"
         " PRIMARY KEY(capability_key,environment_digest,work_id));"
         "CREATE INDEX IF NOT EXISTS idx_options_open ON options(work_id,state,ordinal);"
-        "CREATE INDEX IF NOT EXISTS idx_success_lookup ON successes(capability_key,environment_digest);";
+        "CREATE INDEX IF NOT EXISTS idx_success_lookup ON successes(capability_key,environment_digest);"
+    
+            "CREATE TABLE IF NOT EXISTS repair_episodes ("
+            " episode_id TEXT PRIMARY KEY, work_id TEXT NOT NULL REFERENCES works(id),"
+            " capability_key TEXT NOT NULL, environment_digest TEXT NOT NULL,"
+            " context_digest TEXT NOT NULL, failure_class TEXT NOT NULL,"
+            " strategy_key TEXT NOT NULL,"
+            " verifier_event_id TEXT NOT NULL UNIQUE REFERENCES events(event_id),"
+            " verdict TEXT NOT NULL CHECK(verdict IN ('PASS','FAIL')),"
+            " candidate_sha TEXT NOT NULL, oracle_hash TEXT NOT NULL,"
+            " resulting_revision INTEGER NOT NULL);"
+            "CREATE INDEX IF NOT EXISTS idx_repair_cohort"
+            " ON repair_episodes(capability_key,environment_digest,context_digest,failure_class,strategy_key);";
     if (sql(k, schema) != KOTZE_OK) { kotze_close(k); return KOTZE_ERROR; }
     *out = k;
     return KOTZE_OK;
@@ -418,4 +430,142 @@ int kotze_find_success(kotze_t *k,const char *capability_key,const char *environ
     const unsigned char *v=sqlite3_column_text(s,0);
     if(strlen((const char*)v)+1>cap){sqlite3_finalize(s);return fail(k,KOTZE_DENIED,"Success buffer too small");}
     cp(out,cap,v);sqlite3_finalize(s);return KOTZE_OK;
+}
+
+
+/* This whitelist is a diagnostic taxonomy, not permission or verified cause.
+ * Caller-labelled strategy and context are metadata; only the source event
+ * establishes a verifier-REPORTED outcome.
+ */
+static int repair_failure_class_valid(const char *s) {
+    static const char *classes[] = {
+        "CONTRACT_LOST", "PREMATURE_DONE", "REPEAT_WITHOUT_DELTA",
+        "TOOL_MISROUTED", "MATH_UNGROUNDED", "CONSTRAINT_VIOLATION",
+        "STALE_EVIDENCE", "FALSE_PROGRESS", "UNAUTHORIZED_EFFECT",
+        "BAD_ROOT_CAUSE", "ORACLE_COMPROMISED", "ENVIRONMENT_FAILURE",
+        "HUMAN_REJECTION", "UNKNOWN_CAUSE"
+    };
+    if (!s) return 0;
+    for (size_t i = 0; i < sizeof(classes)/sizeof(classes[0]); ++i)
+        if (!strcmp(s, classes[i])) return 1;
+    return 0;
+}
+
+int kotze_record_repair_episode(kotze_t *k, const kotze_repair_episode *e) {
+    if (!k || !e || !valid(e->episode_id,128) || !valid(e->work_id,128) ||
+        !valid(e->capability_key,128) || !valid(e->environment_digest,128) ||
+        !valid(e->context_digest,128) || !repair_failure_class_valid(e->failure_class) ||
+        !valid(e->strategy_key,128) || !valid(e->verifier_event_id,128))
+        return KOTZE_DENIED;
+    if (begin(k) < 0) return KOTZE_ERROR;
+    sqlite3_stmt *s = NULL;
+    int rc = prepare(k, &s,
+        "SELECT work_id,name,actor,evidence_ref,candidate_sha,oracle_hash,resulting_revision "
+        "FROM events WHERE event_id=?");
+    if (rc < 0) return commit(k,rc);
+    bind(s,1,e->verifier_event_id);
+    int step = sqlite3_step(s);
+    if (step != SQLITE_ROW) {
+        sqlite3_finalize(s);
+        return commit(k,fail(k,step==SQLITE_DONE?KOTZE_DENIED:KOTZE_ERROR,
+                 step==SQLITE_DONE?"Missing verifier event":sqlite3_errmsg(k->db)));
+    }
+    const char *event_work=(const char*)sqlite3_column_text(s,0);
+    const char *event_name=(const char*)sqlite3_column_text(s,1);
+    const char *proof=(const char*)sqlite3_column_text(s,3);
+    const char *candidate=(const char*)sqlite3_column_text(s,4);
+    const char *oracle=(const char*)sqlite3_column_text(s,5);
+    int accepted=eq(event_work,e->work_id) &&
+        sqlite3_column_int(s,2)==KOTZE_VERIFIER &&
+        (eq(event_name,"VERIFY_PASS") || eq(event_name,"VERIFY_FAIL")) &&
+        valid(proof,512) && valid(candidate,128) && valid(oracle,128);
+    char candidate_copy[129]={0}, oracle_copy[129]={0}, verdict[5]={0};
+    int64_t revision=sqlite3_column_int64(s,6);
+    if (accepted) {
+        cp(candidate_copy,sizeof(candidate_copy),(const unsigned char*)candidate);
+        cp(oracle_copy,sizeof(oracle_copy),(const unsigned char*)oracle);
+        snprintf(verdict,sizeof(verdict),"%s",eq(event_name,"VERIFY_PASS")?"PASS":"FAIL");
+    }
+    sqlite3_finalize(s);
+    if (!accepted)
+        return commit(k,fail(k,KOTZE_DENIED,"Verifier event is not a valid bounded repair result"));
+
+    rc=prepare(k,&s,
+        "SELECT work_id,capability_key,environment_digest,context_digest,failure_class,"
+        "strategy_key,verifier_event_id,verdict,candidate_sha,oracle_hash,resulting_revision "
+        "FROM repair_episodes WHERE episode_id=?");
+    if(rc<0)return commit(k,rc);
+    bind(s,1,e->episode_id);
+    step=sqlite3_step(s);
+    if(step==SQLITE_ROW) {
+        int same=eq((const char*)sqlite3_column_text(s,0),e->work_id)
+              &&eq((const char*)sqlite3_column_text(s,1),e->capability_key)
+              &&eq((const char*)sqlite3_column_text(s,2),e->environment_digest)
+              &&eq((const char*)sqlite3_column_text(s,3),e->context_digest)
+              &&eq((const char*)sqlite3_column_text(s,4),e->failure_class)
+              &&eq((const char*)sqlite3_column_text(s,5),e->strategy_key)
+              &&eq((const char*)sqlite3_column_text(s,6),e->verifier_event_id)
+              &&eq((const char*)sqlite3_column_text(s,7),verdict)
+              &&eq((const char*)sqlite3_column_text(s,8),candidate_copy)
+              &&eq((const char*)sqlite3_column_text(s,9),oracle_copy)
+              &&sqlite3_column_int64(s,10)==revision;
+        sqlite3_finalize(s);
+        return commit(k,same?KOTZE_REPLAY:fail(k,KOTZE_CONFLICT,"Repair episode ID reused"));
+    }
+    sqlite3_finalize(s);
+    if(step!=SQLITE_DONE)
+        return commit(k,fail(k,KOTZE_ERROR,sqlite3_errmsg(k->db)));
+
+    rc=prepare(k,&s,"SELECT episode_id FROM repair_episodes WHERE verifier_event_id=?");
+    if(rc<0)return commit(k,rc);
+    bind(s,1,e->verifier_event_id);
+    step=sqlite3_step(s);
+    sqlite3_finalize(s);
+    if(step==SQLITE_ROW)
+        return commit(k,fail(k,KOTZE_CONFLICT,"Verifier event already counted"));
+    if(step!=SQLITE_DONE)
+        return commit(k,fail(k,KOTZE_ERROR,sqlite3_errmsg(k->db)));
+
+    rc=prepare(k,&s,
+        "INSERT INTO repair_episodes(episode_id,work_id,capability_key,environment_digest,"
+        "context_digest,failure_class,strategy_key,verifier_event_id,verdict,"
+        "candidate_sha,oracle_hash,resulting_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)");
+    if(rc<0)return commit(k,rc);
+    bind(s,1,e->episode_id);bind(s,2,e->work_id);bind(s,3,e->capability_key);
+    bind(s,4,e->environment_digest);bind(s,5,e->context_digest);
+    bind(s,6,e->failure_class);bind(s,7,e->strategy_key);
+    bind(s,8,e->verifier_event_id);bind(s,9,verdict);
+    bind(s,10,candidate_copy);bind(s,11,oracle_copy);
+    sqlite3_bind_int64(s,12,revision);
+    return commit(k,done(k,s));
+}
+
+int kotze_get_repair_stats(kotze_t *k, const char *capability_key,
+                           const char *environment_digest, const char *context_digest,
+                           const char *failure_class, const char *strategy_key,
+                           kotze_repair_stats *out) {
+    if (!k || !out || !valid(capability_key,128) ||
+        !valid(environment_digest,128) || !valid(context_digest,128) ||
+        !repair_failure_class_valid(failure_class) || !valid(strategy_key,128))
+        return KOTZE_DENIED;
+    out->verifier_reported_pass=0;
+    out->verifier_reported_fail=0;
+    sqlite3_stmt *s=NULL;
+    int rc=prepare(k,&s,
+        "SELECT COALESCE(SUM(CASE WHEN verdict='PASS' THEN 1 ELSE 0 END),0),"
+        "COALESCE(SUM(CASE WHEN verdict='FAIL' THEN 1 ELSE 0 END),0)"
+        " FROM repair_episodes WHERE capability_key=? AND environment_digest=?"
+        " AND context_digest=? AND failure_class=? AND strategy_key=?");
+    if(rc<0)return rc;
+    bind(s,1,capability_key);bind(s,2,environment_digest);bind(s,3,context_digest);
+    bind(s,4,failure_class);bind(s,5,strategy_key);
+    int step=sqlite3_step(s);
+    if(step==SQLITE_ROW) {
+        out->verifier_reported_pass=(uint64_t)sqlite3_column_int64(s,0);
+        out->verifier_reported_fail=(uint64_t)sqlite3_column_int64(s,1);
+        sqlite3_finalize(s);
+        return KOTZE_OK;
+    }
+    sqlite3_finalize(s);
+    return fail(k,KOTZE_ERROR,sqlite3_errmsg(k->db));
 }
