@@ -1,15 +1,15 @@
-# KOTZE Agent
+# KOTZE Harness
 
 ## Wissenschaftlich fundiertes Architektur-, Forschungs- und Produktkonzept
 
-**Arbeitstitel:** KOTZE Agent  
+**Arbeitstitel:** KOTZE Harness  
 **Langform:** **K**ontext · **O**bject · **T**rajectory · **Z**ero-Trust · **E**vidence  
-**Produktkategorie:** Fully Autonomous Coding Agent / Autonomous Software Repair & Engineering Agent  
+**Produktkategorie:** Autonomous Coding-Agent Harness / Evidence-Governed Software Repair Runtime  
 **Version:** Konzept 1.3, 12. November 2026 (bidirektionale Ursachenanalyse, Prämissenprüfung und Second Thought)  
 **Status:** Forschungs- und Architekturkonzept; **kein Implementierungs- oder Produktivnachweis**  
 **Leitmotiv:** *Wenig zusätzlicher Code, große nachweisbare Wirkung.*
 
-> **Produktentscheidung.** Der Produktname ist **KOTZE Agent**. „Harness“ bezeichnet seine Laufzeit- und Kontrollumgebung, nicht das Gesamtprodukt. KOTZE Agent ist ein eigenständig einsetzbarer autonomer Coding-Agent. Seine **erste und wichtigste Kernkompetenz** ist die selbstständige Erkennung, Reproduktion, Ursachenanalyse, Behebung und unabhängige Verifikation von Softwarefehlern. Die autonome Neuentwicklung, Weiterentwicklung und Wartung von Software ist Teil des Zielbildes, aber darf den Repair-Fokus nicht verwässern.
+> **Produktentscheidung.** Der Produktname lautet **KOTZE Harness**. Ein Harness stellt einem austauschbaren Sprachmodell den kontrollierten Werkzeugzugriff, den dauerhaften Kontext, die Ausführungssteuerung, Berechtigungen und unabhängige Verifikation bereit. **Modell + Harness = autonomer Coding-Agent.** KOTZE Harness ist die eigenständig betreibbare Laufzeit- und Kontrollumgebung für diesen Agenten; der initiale Produktfokus bleibt die autonome Reproduktion, Diagnose, Behebung und Verifikation von Softwarefehlern. Die weitere autonome Softwareentwicklung ist Teil des Zielbilds.
 >
 > **Architekturentscheidung.** Der deterministische Kontrollkern wird **in C11** konzipiert. Er enthält explizite, persistente State Machines für Auftrag, Diagnose, Agentenlauf, Änderung, Verifikation und Recovery. Die fachlichen Mechanismen aus **Trace-first-Entscheidungslogik** und **Trajectory-Assurance-Logik** werden **in die eigene KOTZE-Agent-Codebasis integriert bzw. dupliziert**; zur Kernfunktion dürfen **keine laufenden Repair-/Assurance-Fremddienste erforderlich** sein. Wiederverwendung bedeutet hier auch gezieltes Portieren und Adaptieren von Code – nicht nur einen externen API-Aufruf.
 
@@ -17,7 +17,7 @@
 
 ## 0. Executive Summary
 
-KOTZE Agent soll einen Softwaredefekt vom beobachtbaren Fehlersignal bis zur nachweislich wirksamen Korrektur **ohne permanente menschliche Steuerung** bearbeiten. Der Agent erhält ein Ziel oder ein Ereignis, beschafft selbstständig den minimal notwendigen Kontext, entscheidet, ob eine Korrektur erforderlich ist, grenzt den ausführbaren Fehlerpfad ein, reproduziert den Defekt, entwickelt und implementiert eine zielgerichtete Änderung, validiert diese gegen denselben Fehler und relevante Regressionen, dokumentiert die Beweiskette und kann nach Unterbrechungen aus einem dauerhaften Zustand fortfahren.
+KOTZE Harness soll einen Softwaredefekt vom beobachtbaren Fehlersignal bis zur nachweislich wirksamen Korrektur **ohne permanente menschliche Steuerung** bearbeiten. Der Agent erhält ein Ziel oder ein Ereignis, beschafft selbstständig den minimal notwendigen Kontext, entscheidet, ob eine Korrektur erforderlich ist, grenzt den ausführbaren Fehlerpfad ein, reproduziert den Defekt, entwickelt und implementiert eine zielgerichtete Änderung, validiert diese gegen denselben Fehler und relevante Regressionen, dokumentiert die Beweiskette und kann nach Unterbrechungen aus einem dauerhaften Zustand fortfahren.
 
 Die **autonome Software-Reparatur** wird als geschlossener, evidenzgesteuerter Engineering-Prozess verstanden, nicht als Prompt-Schleife, die bis zur Meldung „DONE“ wiederholt wird. Abschluss ist ein unabhängiger technischer Sachverhalt, keine subjektive Behauptung eines Coding-Workers.
 
@@ -32,15 +32,15 @@ Die vorgeschlagene Architektur kombiniert:
 
 **Wissenschaftlicher Kernbefund:** Die Forschung spricht **nicht** pauschal für möglichst komplexe Agentenarchitekturen. Sie spricht für den **geringsten wirksamen Kontrollaufwand** je Aufgabe. Ein einfacher, leistungsfähiger Coding-Worker sollte direkt arbeiten können; zusätzliche Recherche, Subagenten, Kontextkomprimierung oder parallelisierte Lösungen werden nur dann zugelassen, wenn der erwartete Erkenntnis- oder Erfolgsgewinn ihren Preis rechtfertigt [R04–R06, R14].
 
-**Abnahmekriterium der ersten Produktstufe:** Auf einem realen, isoliert reproduzierbaren Repository-Defekt kann KOTZE Agent selbstständig eine korrekte Reparatur durchführen, den Originalfehler vor/nach dem Patch nachweisen, relevante Regressionen ausschließen, einen verifizierbaren Patch erzeugen und nach einem simulierten Absturz ohne unkontrollierte Doppelaktionen weiterarbeiten. Dabei läuft **keine kostenpflichtige CI** als implizite Nebenwirkung.
+**Abnahmekriterium der ersten Produktstufe:** Auf einem realen, isoliert reproduzierbaren Repository-Defekt kann KOTZE Harness selbstständig eine korrekte Reparatur durchführen, den Originalfehler vor/nach dem Patch nachweisen, relevante Regressionen ausschließen, einen verifizierbaren Patch erzeugen und nach einem simulierten Absturz ohne unkontrollierte Doppelaktionen weiterarbeiten. Dabei läuft **keine kostenpflichtige CI** als implizite Nebenwirkung.
 
 ---
 
 ## 1. Begriffsklärung: Agent, Harness, Autonomie und Selbstheilung
 
-### 1.1 Warum „KOTZE Agent“ präziser als „KOTZE Harness“ ist
+### 1.1 Warum „KOTZE Harness“ die präzisere technische Bezeichnung ist
 
-Ein **Coding-Agent** verfolgt ein Entwicklungsziel, wählt Handlungen, liest und ändert Code, führt Werkzeuge aus, bewertet Beobachtungen und iteriert. Ein **Harness** umfasst die Ausführungsumgebung des Modells: Werkzeuge, Kontext, Policies, Zustandsverwaltung, Session-Kontrolle, Memory und Beobachtungs-/Evaluationsschnittstellen. KOTZE ist das **vollständige Produkt**; sein Harness ist eine interne Komponente [R01, R17–R20].
+Ein **Coding-Agent** verfolgt ein Entwicklungsziel, wählt Handlungen, liest und ändert Code, führt Werkzeuge aus, bewertet Beobachtungen und iteriert. Ein **Harness** umfasst die Ausführungsumgebung des Modells: Werkzeuge, Kontext, Policies, Zustandsverwaltung, Session-Kontrolle, Memory und Beobachtungs-/Evaluationsschnittstellen. KOTZE Harness ist die **kontrollierende Laufzeitumgebung**; zusammen mit einem Coding-Modell entsteht der handlungsfähige autonome Agent. Die Bezeichnung beschreibt daher den eigentlichen technischen Produktkern und behauptet nicht, das Sprachmodell selbst zu sein [R01, R17–R20].
 
 Der Name beschreibt die technische Leitlinie:
 
@@ -214,7 +214,7 @@ Für jede portierte Fähigkeit ist jedoch eine `PARITY_MATRIX` mit Quellrevision
 
 ```mermaid
 flowchart TB
-    I[Ziel / Fehlerereignis / GitHub-Issue / Log] --> K[KOTZE Agent – C11 Decision & State Kernel]
+    I[Ziel / Fehlerereignis / GitHub-Issue / Log] --> K[KOTZE Harness – C11 Decision & State Kernel]
     K --> S[Integrated Trace-first-Entscheidungslogik Repair Intelligence]
     K --> A[Integrated Trajectory-Assurance-Logik Trajectory Assurance]
     K --> M[(SQLite: State / Journal / Evidence Refs)]
@@ -549,7 +549,7 @@ Das Diagramm zeigt *illustrative* mögliche Äste und keine festgestellten Ursac
 
 **Akzeptanz:** Derselbe reproduzierte Fehler erscheint in Fishbone und Warum-Tree mit identischen IDs, Evidenz und Status. Eine widerlegte Ursache verschwindet nicht aus der Historie. Ein mehrfach wirksamer Ursachen-Knoten lässt sich in mehreren Zweigen darstellen, ohne ihn zu duplizieren. Crash/Restart erhält alle Belege, Graphrevisionen und Kanten. Keine Oberfläche oder Modellbewertung kann ein unbelegtes Ursachenlabel auf `VERIFIED` setzen.
 
-**Primärquellen:** ASQ, *Fishbone Diagram* (https://asq.org/quality-resources/fishbone), IHI, *Cause and Effect Diagram* (https://www.ihi.org/library/tools/cause-and-effect-diagram). Für die UI: React Flow, *Node-Based UIs in React* (https://reactflow.dev/), MIT-Lizenz. Die Quellen stützen die Visualisierungs- und Analysegrundidee, nicht eine bereits gemessene Erfolgsquote von KOTZE Agent.
+**Primärquellen:** ASQ, *Fishbone Diagram* (https://asq.org/quality-resources/fishbone), IHI, *Cause and Effect Diagram* (https://www.ihi.org/library/tools/cause-and-effect-diagram). Für die UI: React Flow, *Node-Based UIs in React* (https://reactflow.dev/), MIT-Lizenz. Die Quellen stützen die Visualisierungs- und Analysegrundidee, nicht eine bereits gemessene Erfolgsquote von KOTZE Harness.
 
 
 ---
@@ -1103,7 +1103,7 @@ Dies sind **gezielte empirische und Implementierungsfragen**, keine Gründe, die
 
 | ADR | Entscheidung | Status / Begründung |
 |---|---|---|
-| ADR-001 | Produktname **KOTZE Agent** | beschlossen; „Harness“ bleibt interne Schicht |
+| ADR-001 | Produktname **KOTZE Harness** | beschlossen; das Harness ist der eigenständige Produktkern; Modell + Harness bildet den Coding-Agenten |
 | ADR-002 | Schwerpunkt autonome Fehlerbehebung | beschlossen; allgemeine Entwicklung als anschließender Fähigkeitsausbau |
 | ADR-003 | **C11 für den deterministischen Kern** | beschlossen als Konzeptentwurf; C-Portabilität und Memory Safety ausdrücklich testen |
 | ADR-004 | **Repair-/Assurance-Mechanismen integriert und dupliziert** | beschlossen; eigenständiger Betrieb ohne deren Dienste |
@@ -1149,7 +1149,7 @@ Dies sind **gezielte empirische und Implementierungsfragen**, keine Gründe, die
 
 ## 18. Schlussfolgerung
 
-KOTZE Agent ist **kein Harness mit Bugfix-Plugin**, sondern ein **vollständiger autonomer Coding-Agent mit eigenem, kleinen C11-Execution- und Assurance-Kern**. Die bereits vorhandenen Trace-first-Entscheidungslogik- und Trajectory-Assurance-Logik-Funktionen werden bewusst in das neue Produkt integriert. Es soll dadurch einen eindeutigen technischen Mittelpunkt besitzen und auch unabhängig von einer laufenden vorhandener Agenten-Stack-Installation funktionieren.
+KOTZE Harness ist **kein bloßes Bugfix-Plugin**, sondern die **eigenständig lauffähige Kontroll-, Ausführungs-, Kontext- und Verifikationsumgebung** für einen vollständig autonomen Coding-Agenten mit kleinem C11-Kern. Die bereits vorhandenen Trace-first-Entscheidungslogik- und Trajectory-Assurance-Logik-Funktionen werden bewusst in das neue Produkt integriert. Es soll dadurch einen eindeutigen technischen Mittelpunkt besitzen und auch unabhängig von einer laufenden vorhandener Agenten-Stack-Installation funktionieren.
 
 Trace-guided Fault Localization und kontrollierte Mehrhypothesenprüfung werden als zusätzliche, bedarfsgesteuerte Verfahren in Abschnitt 20 spezifiziert. Die kontinuierliche Fehlerprävention mit einer gemeinsamen Ursachen-Map ist in Abschnitt 21 definiert. Die wissenschaftlichen Arbeiten sprechen für drei Prioritäten: **eine einfache, leistungsfähige Ausführungsschleife**, **runtime- und evidenzgestützte Fehlerbehebung** und **einen sparsamen, nur bei Bedarf eskalierenden Kontrollmechanismus**. Google Harness², RRSI und AHE sind wertvolle zweite Entwicklungsstufe, wenn die erste autonom und nachweisbar repariert.
 
@@ -1270,7 +1270,7 @@ Die Autoren berichten für DeepSeek-V3.2 durchschnittlich **77.000 Tokens pro Bu
 
 ### 20.2 Übernommene Methoden: Entscheidung und Grenzen
 
-| Mechanismus | Warum er übernommen wird | Implementierung im KOTZE Agent | Was bewusst **nicht** übernommen wird |
+| Mechanismus | Warum er übernommen wird | Implementierung im KOTZE Harness | Was bewusst **nicht** übernommen wird |
 |---|---|---|---|
 | **Targeted runtime snapshot** | Stille Logikfehler liefern häufig nur falsche Ausgabewerte; Zwischenschritte fehlen. | Kleinstmögliche Probe auf dem nachgewiesenen Pfad: typisierte Variablen-, Branch- und Return-Snapshots; begrenzte Ereignis-/Bytezahl; Hash und Provenienz je Probe. | Pauschale Instrumentierung kompletter Repositories und unbeschränktes Trace-Dumping. |
 | **Trace-as-constraint** | Kandidaten müssen sich an konkreten Beobachtungen messen lassen statt plausible Geschichten zu erzählen. | Hypothese referenziert beobachtete Baseline-Fakten, macht eine falsifizierbare Vorhersage und benennt die erwartete Änderung beim identischen Reproducer. | Rohtrace als angebliche mathematische Korrektheitsgarantie. |
