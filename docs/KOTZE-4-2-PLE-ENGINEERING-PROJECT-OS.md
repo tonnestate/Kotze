@@ -310,6 +310,12 @@ Eine KOTZE-4-2-Änderung gilt erst als integrabel, wenn sie:
 
 **Nicht Bestandteil dieses Konzeptcommits:** ausführbarer PLE-Adapter, Paketinstallation, Download großer Norm-/CAD-Korpora, Datenbankmigration, Änderung des bestehenden KOTZE-C-Kerns, Übernahme privaten Sourcecodes, Änderungen an kommerziellen Donor-Repositories, externe Nachrichten, bezahlte Modellläufe, GitHub Actions oder Kaggle-Submission.
 
+## 12a. Statistisches Second Brain und Repair-Paar
+
+Neben dem fachlichen Engineering Second Brain benötigt KOTZE eine **evidenzgestützte statistische Erfahrungs- und Fehlergedächtnisschicht**. Sie speichert nachvollziehbare Fehlversuche und unabhängig verifizierte Reparaturergebnisse, ohne selbst technische Wahrheit oder Berechtigungen festzulegen. Ein **funktional getrenntes Repair-Paar** umfasst Ursachenanalyse/gezielte Nachbesserung und eine vertrauenswürdig getrennte Prüfung. Es erkennt auch kognitive Prozessfehler: vergessene Nutzervorgaben, falsche Toolwahl, Scheinerfolg, Wiederholungsschleifen und unautorisierte Aktionen. Keine zweite Modellinstanz gilt allein als unabhängiger Zero-Trust-Verifier.
+
+Die vollständigen Schnittstellen, Zustände, statistischen Grenzen und Abnahmekriterien sind in [Statistical Second Brain and Evidence-Governed Repair Pair](STATISTICAL-SECOND-BRAIN-AND-REPAIR-PAIR.md) spezifiziert. Das ist eine **Sollarchitektur**, kein implementierter Benchmark-Vorteil.
+
 ## 13. Konkrete Architekturentscheidung
 
 KOTZE-4-2 soll **ein offline-fähiges, evidenzgesteuertes Engineering Project OS** werden, das praktische Materialkunde, GIS, Baugrund, CAD/BIM, Ingenieurmathematik, Risiko, Kosten und Termine in **einer** nachvollziehbaren Entscheidungs- und Prüfkette verbindet.
