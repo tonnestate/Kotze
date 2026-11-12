@@ -5,13 +5,13 @@
 **Arbeitstitel:** KOTZE Agent  
 **Langform:** **K**ontext · **O**bject · **T**rajectory · **Z**ero-Trust · **E**vidence  
 **Produktkategorie:** Fully Autonomous Coding Agent / Autonomous Software Repair & Engineering Agent  
-**Version:** Konzept 1.0, 12. November 2026  
+**Version:** Konzept 1.2, 12. November 2026 (Trace-Repair, CausalMap und Continuous Improvement)  
 **Status:** Forschungs- und Architekturkonzept; **kein Implementierungs- oder Produktivnachweis**  
 **Leitmotiv:** *Wenig zusätzlicher Code, große nachweisbare Wirkung.*
 
 > **Produktentscheidung.** Der Produktname ist **KOTZE Agent**. „Harness“ bezeichnet seine Laufzeit- und Kontrollumgebung, nicht das Gesamtprodukt. KOTZE Agent ist ein eigenständig einsetzbarer autonomer Coding-Agent. Seine **erste und wichtigste Kernkompetenz** ist die selbstständige Erkennung, Reproduktion, Ursachenanalyse, Behebung und unabhängige Verifikation von Softwarefehlern. Die autonome Neuentwicklung, Weiterentwicklung und Wartung von Software ist Teil des Zielbildes, aber darf den Repair-Fokus nicht verwässern.
 >
-> **Architekturentscheidung.** Der deterministische Kontrollkern wird **in C11** konzipiert. Er enthält explizite, persistente State Machines für Auftrag, Diagnose, Agentenlauf, Änderung, Verifikation und Recovery. Die fachlichen Mechanismen aus **SPARI** und **AppleMe** werden **in die eigene KOTZE-Agent-Codebasis integriert bzw. dupliziert**; zur Kernfunktion dürfen **keine laufenden SPARI-/AppleMe-Fremddienste erforderlich** sein. Wiederverwendung bedeutet hier auch gezieltes Portieren und Adaptieren von Code – nicht nur einen externen API-Aufruf.
+> **Architekturentscheidung.** Der deterministische Kontrollkern wird **in C11** konzipiert. Er enthält explizite, persistente State Machines für Auftrag, Diagnose, Agentenlauf, Änderung, Verifikation und Recovery. Die fachlichen Mechanismen aus **Trace-first-Entscheidungslogik** und **Trajectory-Assurance-Logik** werden **in die eigene KOTZE-Agent-Codebasis integriert bzw. dupliziert**; zur Kernfunktion dürfen **keine laufenden Repair-/Assurance-Fremddienste erforderlich** sein. Wiederverwendung bedeutet hier auch gezieltes Portieren und Adaptieren von Code – nicht nur einen externen API-Aufruf.
 
 ---
 
@@ -24,13 +24,13 @@ Die **autonome Software-Reparatur** wird als geschlossener, evidenzgesteuerter E
 Die vorgeschlagene Architektur kombiniert:
 
 1. **Einen kleinen nativen C11-Kern** für Zustandsmaschinen, Transaktionen, Budgets, Aktionszulassung, deterministische Übergänge, Deadlines und Recovery.
-2. **Integrierte SPARI-Mechanismen** für *trace-first debugging*, ausgeführte Codepfade, Build-vs-Borrow, minimale Änderungen und Retest des ursprünglichen Pfads.
-3. **Integrierte AppleMe-Mechanismen** für Agent-Trajectory, Fortschrittsnachweis, Detektion von Schleifen/Stillstand, kontrollierte Diagnose-Probes und begrenzte Revival-Versuche.
-4. **Austauschbare Coding-Worker** (unter anderem Codex CLI/App Server, Claude Code, GitHub Copilot SDK/CLI, lokale oder über PlumMe angebotene Modelle). Der Worker bearbeitet Code; KOTZE kontrolliert den technischen Lebenszyklus.
+2. **Integrierte Trace-first-Entscheidungslogik-Mechanismen** für *trace-first debugging*, ausgeführte Codepfade, Build-vs-Borrow, minimale Änderungen und Retest des ursprünglichen Pfads.
+3. **Integrierte Trajectory-Assurance-Logik-Mechanismen** für Agent-Trajectory, Fortschrittsnachweis, Detektion von Schleifen/Stillstand, kontrollierte Diagnose-Probes und begrenzte Revival-Versuche.
+4. **Austauschbare Coding-Worker** (unter anderem Codex CLI/App Server, Claude Code, GitHub Copilot SDK/CLI, lokale oder über Modellversorgung angebotene Modelle). Der Worker bearbeitet Code; KOTZE kontrolliert den technischen Lebenszyklus.
 5. **Beweisorientierte Verifikation** mit reproduzierbaren Tests, Ausführungs- und Regressionsnachweisen, getrennten Berechtigungen und einer unveränderlichen Baseline.
 6. **Eine optionale, geschützte Self-Improvement-Schleife**, inspiriert von Google Harness², RRSI und AHE, die den Agenten-Harness nur nach nachweisbarer Verbesserung auf zurückgehaltenen Aufgaben verändert.
 
-**Wissenschaftlicher Kernbefund:** Die Forschung spricht **nicht** pauschal für möglichst komplexe Agentenarchitekturen. Sie spricht für den **geringsten wirksamen Kontrollaufwand** je Aufgabe. Ein einfacher, leistungsfähiger Coding-Worker sollte direkt arbeiten können; zusätzliche Recherche, Subagenten, Kontextkomprimierung oder parallelisierte Lösungen werden nur dann zugelassen, wenn der erwartete Erkenntnis- oder Erfolgsgewinn ihren Preis rechtfertigt [R04–R06, R14–R15].
+**Wissenschaftlicher Kernbefund:** Die Forschung spricht **nicht** pauschal für möglichst komplexe Agentenarchitekturen. Sie spricht für den **geringsten wirksamen Kontrollaufwand** je Aufgabe. Ein einfacher, leistungsfähiger Coding-Worker sollte direkt arbeiten können; zusätzliche Recherche, Subagenten, Kontextkomprimierung oder parallelisierte Lösungen werden nur dann zugelassen, wenn der erwartete Erkenntnis- oder Erfolgsgewinn ihren Preis rechtfertigt [R04–R06, R14].
 
 **Abnahmekriterium der ersten Produktstufe:** Auf einem realen, isoliert reproduzierbaren Repository-Defekt kann KOTZE Agent selbstständig eine korrekte Reparatur durchführen, den Originalfehler vor/nach dem Patch nachweisen, relevante Regressionen ausschließen, einen verifizierbaren Patch erzeugen und nach einem simulierten Absturz ohne unkontrollierte Doppelaktionen weiterarbeiten. Dabei läuft **keine kostenpflichtige CI** als implizite Nebenwirkung.
 
@@ -81,7 +81,7 @@ Ein autonomer Coding-Agent kann später neue Software erstellen und bestehende A
 | F-03 | Fehler reproduzieren | Ein unabhängiges Signal unterscheidet zuverlässig `BUG_PRESENT`, `BUG_ABSENT` oder `UNKNOWN`. |
 | F-04 | Ursachenanalyse | Evidenz des tatsächlich ausgeführten Pfads hat Vorrang vor Dateinamen und Architekturvermutungen. |
 | F-05 | Bestehende Lösung verwenden | Relevante Implementierung, getesteter Fix oder Bibliothek wird vor zusätzlichem Code geprüft. |
-| F-06 | Patch autononom erzeugen | Coding-Worker darf nur in seiner zugelassenen Workspace-/Worktree-Grenze ändern. |
+| F-06 | Patch autonom erzeugen | Coding-Worker darf nur in seiner zugelassenen Workspace-/Worktree-Grenze ändern. |
 | F-07 | Patch unabhängig prüfen | Original-Reproduktion, relevante Regression, Diff-Integrität und fachliche Akzeptanz werden getrennt geprüft. |
 | F-08 | Fehlerhafte Strategien verwerfen | Widerlegte Hypothesen und unproduktive Wiederholungen werden gespeichert und nicht blind wiederholt. |
 | F-09 | Crash-Recovery | Nach Prozessabbruch ist der Zustand rekonstruierbar; externe Effekte werden nicht blind doppelt ausgeführt. |
@@ -93,7 +93,7 @@ Ein autonomer Coding-Agent kann später neue Software erstellen und bestehende A
 
 ### 2.2 Nichtfunktionale Anforderungen
 
-- **Eigenständigkeit:** Keine aktive Instanz von SPARI oder AppleMe erforderlich; relevante Mechanismen werden in KOTZE integriert/portiert.
+- **Eigenständigkeit:** Keine aktive Instanz von Trace-first-Entscheidungslogik oder Trajectory-Assurance-Logik erforderlich; relevante Mechanismen werden in KOTZE integriert/portiert.
 - **Modellunabhängigkeit:** Adapter statt hart codierter Anbieterbindung.
 - **Ressourcensparsamkeit:** C11-Kern; deterministische Schritte brauchen keinen Modellaufruf.
 - **Reproduzierbarkeit:** Aufträge, Arbeitskopien, Testbedingungen, Modell-/Toolrevisionen und Ergebnisse werden versioniert.
@@ -104,9 +104,9 @@ Ein autonomer Coding-Agent kann später neue Software erstellen und bestehende A
 
 ### 2.3 Ausdrückliche Nicht-Ziele für die erste Implementierung
 
-- Kein neues allgemeines LLM-Gateway neben bestehenden Coding-Worker-Integrationen und PlumMe.
+- Kein neues allgemeines LLM-Gateway neben bestehenden Coding-Worker-Integrationen und Modellversorgung.
 - Keine neue umfassende Programmiersprachenanalyse durch einen selbstgeschriebenen Parser.
-- Kein zweites globales FruitStack-Gedächtnis oder eine neue Wissensgraph-Plattform.
+- Kein zweites globales vorhandener Agenten-Stack-Gedächtnis oder eine neue Wissensgraph-Plattform.
 - Keine unbeschränkte Selbstmodifikation des Safety-/Evidence-Kerns.
 - Keine automatische, kostenpflichtige GitHub-Actions-Ausführung als Standardtest.
 - Keine Behauptung vollständiger Autonomie, solange die definierten End-to-End-Nachweise fehlen.
@@ -121,17 +121,17 @@ Ein autonomer Coding-Agent kann später neue Software erstellen und bestehende A
 
 **Beyond the Model (2026).** Die Wirkung komplexer Harnesses variiert nach Aufgabentyp: Einfache SWE-Reparaturen profitieren bei starken Modellen weniger von zusätzlichem Orchestrierungsaufwand; offene Repository-Aufgaben können von strukturierten Tools und geeigneten Subagenten gewinnen [R05].
 
-**Apple/EPFL, Minimal Harness for MLE (2026).** Bei den untersuchten Machine-Learning-Engineering-Aufgaben zeigte der aufwendige Harness unter gleichen Modell-/Zeitbedingungen keinen Vorteil gegenüber einem einfachen Coding-Agenten. Das ist ein Warnsignal gegen unnötige Architektur, **kein allgemeiner Beweis**, dass zusätzliche Kontrollmechanismen für langlaufende Software-Reparatur wertlos wären [R06].
+**Minimal Harness for MLE (2026).** Bei den untersuchten Machine-Learning-Engineering-Aufgaben zeigte der aufwendige Harness unter gleichen Modell-/Zeitbedingungen keinen Vorteil gegenüber einem einfachen Coding-Agenten. Das ist ein Warnsignal gegen unnötige Architektur, **kein allgemeiner Beweis**, dass zusätzliche Kontrollmechanismen für langlaufende Software-Reparatur wertlos wären [R06].
 
 **Agentless / mini-SWE-agent.** Bereits kontrollierte, einfache Reparaturschritte oder eine sehr kleine Shell-basierte Ausführungsschleife können eine starke Baseline bilden. KOTZE darf nur dann komplexer werden, wenn zusätzliche Komponenten unter gleichen Bedingungen nachweislich mehr leisten [R07, R14].
 
-**Entscheidung:** Der Standardpfad bleibt schlank. Eskalation zu CherryMe-artiger Alternativenanalyse, mehreren Coding-Workern, Memory-Recherche und Harness-Evolution erfolgt **ereignis- und evidenzabhängig**, nicht bei jeder Aufgabe.
+**Entscheidung:** Der Standardpfad bleibt schlank. Eskalation zu Hypothesen-Engine-artiger Alternativenanalyse, mehreren Coding-Workern, Memory-Recherche und Harness-Evolution erfolgt **ereignis- und evidenzabhängig**, nicht bei jeder Aufgabe.
 
 ### 3.2 Trace-first Repair statt Repository-Spekulation
 
 **SWE-agent (2024)** zeigt den Einfluss des Agent-Computer-Interfaces auf die Qualität von Codeänderungen und Debugging [R08]. **TestPrune (FSE 2026)** verwendet vorhandene Regressionstests zielgerichtet für Reproduktion und Patchprüfung; die berichteten relativen Verbesserungen der Issue-Lösungsrate liegen je nach untersuchter Pipeline bei **8,0–12,9 %**, nicht bei 8–12,9 Prozentpunkten [R09].
 
-Die bestehenden **SPARI Runtime Evidence Gate**-Regeln verlangen bereits:
+Die bestehenden **Trace-first-Entscheidungslogik Runtime Evidence Gate**-Regeln verlangen bereits:
 
 1. kanonischen Einstiegspunkt bestimmen;
 2. Fehler reproduzieren;
@@ -141,7 +141,7 @@ Die bestehenden **SPARI Runtime Evidence Gate**-Regeln verlangen bereits:
 6. kleinste architekturkonforme Änderung erstellen;
 7. denselben ursprünglichen Pfad erneut testen.
 
-KOTZE übernimmt diesen Ablauf **als native, eigenständige Repair-Entscheidungslogik**. Er ist keine neue, unverifizierte Erfindung und muss deshalb nicht bei null beginnen [P01].
+KOTZE übernimmt diesen Ablauf **als native, eigenständige Repair-Entscheidungslogik**. Er ist keine neue, unverifizierte Erfindung und muss deshalb nicht bei null beginnen.
 
 ### 3.3 Kontext, Editing und kompakte Erfahrungen
 
@@ -197,15 +197,15 @@ KOTZE übernimmt diesen Ablauf **als native, eigenständige Repair-Entscheidungs
 | **Anthropic Claude Code** | Persistente Artefakte, Session-Handoff, Generator/Evaluator, Playwright [R19–R20] | Evaluator-Trennung, Recovery-Verträge, UI-/API-/DB-Prüfung | Lange Prompt-Schleifen ohne unabhängigen Evidenz-Gate |
 | **mini-SWE-agent** | Einfache Shell-orientierte Loop als starke Baseline [R14] | Minimalität, messbare Vergleichs-Baseline | Shell ohne Host-Grenzen als Sicherheitsmodell |
 | **SWE-agent / SWE-Edit** | Agent-Computer-Interface; getrennte Codeansicht und Editierausführung [R08, R10] | Kleiner Viewer/Editor-Adapter, strukturierte Edit-Resultate | Zusätzliche trainierte Modelle als ungeprüfte Pflicht |
-| **SPARI (eigener Donor)** | Authority Attestation, Economy Gate, Runtime Evidence Gate, Recomposition [P01–P02] | **Direkt in KOTZE duplizieren/portieren** | Unnötige Abhängigkeit von laufendem SPARI-Dienst |
-| **AppleMe (eigener Donor)** | Plan-/Trajectory-Assurance, Probes, Revival, Provenienz [P03–P04] | **Direkt in KOTZE duplizieren/portieren** | Zweites unabhängiges Pflicht-Deployment |
-| **PomeloMe / MangoMe / PeachMe** | Effektkontrolle, durable Work Identity, Session-/Budget-Gates [P05–P07] | Kontrakte oder selektive Funktionen als Donor | Den gesamten FruitStack als Voraussetzung erzwingen |
+| **Trace-first-Entscheidungslogik (eigener Donor)** | Authority Attestation, Economy Gate, Runtime Evidence Gate, Recomposition | **Direkt in KOTZE duplizieren/portieren** | Unnötige Abhängigkeit von laufendem Trace-first-Entscheidungslogik-Dienst |
+| **Trajectory-Assurance-Logik (eigener Donor)** | Plan-/Trajectory-Assurance, Probes, Revival, Provenienz | **Direkt in KOTZE duplizieren/portieren** | Zweites unabhängiges Pflicht-Deployment |
+| **Ausführungs- und Effektsteuerung / persistenter Arbeitszustand / Session-Kontrollschicht** | Effektkontrolle, durable Work Identity, Session-/Budget-Gates | Kontrakte oder selektive Funktionen als Donor | Den gesamten vorhandener Agenten-Stack als Voraussetzung erzwingen |
 
 ### 4.1 Build-vs-Borrow: ausdrücklich kein Anti-Duplikationsdogma
 
-SPARI ist in der bisherigen Entwicklung ein wiederverwendungsorientierter Entscheidungsmechanismus. **Die Nutzerentscheidung für KOTZE lautet ausdrücklich, funktional eigenständige Kopien seiner relevanten Logik aufzunehmen.** Dasselbe gilt für AppleMe. Zweck: eine autonome, auch ohne laufenden FruitStack funktionsfähige Einheit. Der C-Kern kann diese Logik in schlankem, überprüfbarem Zustandscode implementieren; nicht alle bestehenden Python-Funktionen müssen 1:1 übersetzt werden.
+Trace-first-Entscheidungslogik ist in der bisherigen Entwicklung ein wiederverwendungsorientierter Entscheidungsmechanismus. **Die Nutzerentscheidung für KOTZE lautet ausdrücklich, funktional eigenständige Kopien seiner relevanten Logik aufzunehmen.** Dasselbe gilt für Trajectory-Assurance-Logik. Zweck: eine autonome, auch ohne laufenden vorhandener Agenten-Stack funktionsfähige Einheit. Der C-Kern kann diese Logik in schlankem, überprüfbarem Zustandscode implementieren; nicht alle bestehenden Python-Funktionen müssen 1:1 übersetzt werden.
 
-Für jede portierte Fähigkeit ist jedoch eine `PARITY_MATRIX` mit Quellrevision, Quelltest, KOTZE-Verhalten, bewusst ausgelassenen Varianten und eigenständigem Regressionstest erforderlich. **Code-Duplikation ist beschlossen; unkontrollierte Verhaltensdivergenz ist es nicht.** Die Lizenz- und Vertraulichkeitsbedingungen der jeweiligen Quell-Repositories sind vor einer öffentlichen KOTZE-Veröffentlichung gesondert zu prüfen. Besonders interne/private FruitStack-Implementierungen und konfigurierte Provider-/Policy-Daten dürfen nicht unbeabsichtigt öffentlich werden.
+Für jede portierte Fähigkeit ist jedoch eine `PARITY_MATRIX` mit Quellrevision, Quelltest, KOTZE-Verhalten, bewusst ausgelassenen Varianten und eigenständigem Regressionstest erforderlich. **Code-Duplikation ist beschlossen; unkontrollierte Verhaltensdivergenz ist es nicht.** Die Lizenz- und Vertraulichkeitsbedingungen der jeweiligen Quell-Repositories sind vor einer öffentlichen KOTZE-Veröffentlichung gesondert zu prüfen. Besonders interne/private vorhandener Agenten-Stack-Implementierungen und konfigurierte Provider-/Policy-Daten dürfen nicht unbeabsichtigt öffentlich werden.
 
 ---
 ## 5. Zielarchitektur: schlanker autonomer Agent mit C11-Kern
@@ -215,10 +215,10 @@ Für jede portierte Fähigkeit ist jedoch eine `PARITY_MATRIX` mit Quellrevision
 ```mermaid
 flowchart TB
     I[Ziel / Fehlerereignis / GitHub-Issue / Log] --> K[KOTZE Agent – C11 Decision & State Kernel]
-    K --> S[Integrated SPARI Repair Intelligence]
-    K --> A[Integrated AppleMe Trajectory Assurance]
+    K --> S[Integrated Trace-first-Entscheidungslogik Repair Intelligence]
+    K --> A[Integrated Trajectory-Assurance-Logik Trajectory Assurance]
     K --> M[(SQLite: State / Journal / Evidence Refs)]
-    S --> W[Worker Adapter: Codex / Claude Code / Copilot / PlumMe]
+    S --> W[Worker Adapter: Codex / Claude Code / Copilot / Modellversorgung]
     W --> X[Isolierter Workspace / Worktree / Tests]
     X --> O[Ausführungsbeobachtungen / Trace / Diff]
     O --> S
@@ -230,7 +230,7 @@ flowchart TB
     K -. getrennte Forschungsschleife .-> R[Harness Evolution: Harness² + RRSI + AHE]
 ```
 
-Die Mermaid-Darstellung beschreibt **logische Verantwortung**, nicht den Zwang zu separaten Prozessen. SPARI- und AppleMe-Funktionalität soll als Bestandteil von KOTZE laufen. Für Worker, isolierte Ausführung und externe Verifikation können separate Prozesse trotzdem sinnvoll sein.
+Die Mermaid-Darstellung beschreibt **logische Verantwortung**, nicht den Zwang zu separaten Prozessen. Trace-first-Entscheidungslogik- und Trajectory-Assurance-Logik-Funktionalität soll als Bestandteil von KOTZE laufen. Für Worker, isolierte Ausführung und externe Verifikation können separate Prozesse trotzdem sinnvoll sein.
 
 ### 5.2 Warum C11 – und warum nicht alles in C?
 
@@ -241,8 +241,8 @@ Die Mermaid-Darstellung beschreibt **logische Verantwortung**, nicht den Zwang z
 - Typisierte Zustandsmaschinen und deterministische Übergangsregeln.
 - Transaktionales Aufgaben-/Ausführungsjournal, idempotente Eventverarbeitung.
 - Deadlines, Stop-/Retry-Grenzen, Budgetreservierung, Lease-/Write-Ownership.
-- SPARI-Kernregeln: evidenzabhängiger Eintritt in Diagnose, Hypothesenstatus, Scope-Begrenzung und Same-path-Retest-Gate.
-- AppleMe-Kernregeln: Trajectory-Signale, Loop-/Thrashing-/No-Progress-Erkennung, kontrollierte Probe-/Revival-Entscheidungen.
+- Trace-first-Entscheidungslogik-Kernregeln: evidenzabhängiger Eintritt in Diagnose, Hypothesenstatus, Scope-Begrenzung und Same-path-Retest-Gate.
+- Trajectory-Assurance-Logik-Kernregeln: Trajectory-Signale, Loop-/Thrashing-/No-Progress-Erkennung, kontrollierte Probe-/Revival-Entscheidungen.
 - Prozess- und Adapterüberwachung, strukturierte Tool-Receipts, Integritäts-/Hash-Prüfung.
 - Fail-closed-Entscheidungen für Effekte, Quellrevisionen und Verifikation.
 
@@ -278,9 +278,8 @@ kotze-agent/
   src/
     core/                   # Zustandsmaschinen, Übergangs- und Gate-Logik
     store/                  # SQLite, Ereignisse, atomare Writes, Migrations
-    repair/                 # Evidenzbasierte Diagnose und Reparaturregeln
-    diagnosis/              # CausalMap: Ursachen-Graph, Evidenz und Hypothesen
-    assurance/              # Integrierte AppleMe-Mechanismen
+    repair/                 # Integrierte Trace-first-Entscheidungslogik-Mechanismen
+    assurance/              # Integrierte Trajectory-Assurance-Logik-Mechanismen
     runtime/                # Worker-/Prozessüberwachung, Budget, Lease
     verify/                 # Verifikationsfreigabe und Ergebnisbewertung
     cli/                    # Start, Status, Reconcile, Export
@@ -288,7 +287,7 @@ kotze-agent/
     codex/                  # Bestehende CLI/App-Server-Schnittstelle
     claude-code/            # Bestehende Headless-/SDK-Schnittstelle
     copilot/                # Copilot SDK/CLI, falls autorisiert
-    plumme/                 # Optionaler FruitStack-Workerzugang
+    plumme/                 # Optionaler vorhandener Agenten-Stack-Workerzugang
     test/                   # Projektspezifische Test-/Runner-Adapter
     git-host/               # GitHub-PR/I/O ohne CI-Zwang
   tests/
@@ -339,29 +338,34 @@ KOTZE verwendet mehrere **orthogonale endliche Zustandsautomaten**, statt einen 
 
 ### 6.2 FSM A: Auftragslebenszyklus (`WorkFSM`)
 
-```mermaid
-stateDiagram-v2
-    [*] --> ADMITTED
-    ADMITTED --> CONTEXT_READY: repository + authority resolved
-    CONTEXT_READY --> DIAGNOSING: observed failure
-    CONTEXT_READY --> PLANNING: feature task
-    DIAGNOSING --> PLANNING: evidence-based hypothesis
-    PLANNING --> EXECUTING: plan admitted + write lease
-    EXECUTING --> VERIFYING: patch candidate committed
-    VERIFYING --> COMPLETED: independent evidence PASS
-    VERIFYING --> DIAGNOSING: falsified hypothesis, remaining budget
-    VERIFYING --> BLOCKED: missing evidence or exhausted budget
-    ADMITTED --> BLOCKED: no authority
-    CONTEXT_READY --> BLOCKED: unresolved base/entrypoint
-    PLANNING --> BLOCKED: unsafe / unauthorized action
-    EXECUTING --> RECOVERING: crash / stale worker
-    RECOVERING --> EXECUTING: state reconciled
-    RECOVERING --> BLOCKED: uncertain irreconcilable effect
-    COMPLETED --> [*]
-    BLOCKED --> [*]
-```
+Die folgende Übergangstabelle ist die **normative Semantik**. Alle Guards sind konjunktiv; nicht gelistete Übergänge werden verweigert, protokolliert und erzeugen keine externen Effekte. Der Initialzustand wird durch die erste autorisierte Auftragsaufnahme festgelegt.
 
-**Wichtig:** `COMPLETED` ist die letzte fachliche Anerkennung, nicht ein Echo von `EXECUTING`. `BLOCKED` ist ein legitimer, vollständiger Bericht ohne fingierten Erfolg. Ob ein blockierter Auftrag später erneut zugelassen wird, ist ein neuer autorisierter Übergang.
+| Zustand | Event | Guard | Aktion (transaktional, soweit kein externer Effekt) | Folgezustand |
+|---|---|---|---|---|
+| `NONE` | `WORK_ADMIT` | Eindeutige Work-ID, gültiger Repo-Locator, Berechtigung, Budget | Work-Record und Baseline-Ref anlegen | `ADMITTED` |
+| `ADMITTED` | `CONTEXT_RESOLVED` | Repository-Identität, `base_sha`, erlaubter Scope und Toolpolicy attestiert | Kontext-Snapshot und Revision persistieren | `CONTEXT_READY` |
+| `ADMITTED` | `AUTHORITY_DENIED` | Berechtigung fehlt oder ist widerrufen | Blockgrund und Nachweise protokollieren | `BLOCKED` |
+| `CONTEXT_READY` | `FAILURE_OBSERVED` | Reproducer/Fehlerereignis mit eindeutigem Einstiegspunkt oder zulässigem Unsicherheitsstatus | Diagnose-ID anlegen, Baseline-Check einplanen | `DIAGNOSING` |
+| `CONTEXT_READY` | `FEATURE_REQUESTED` | Abnahmekriterien und Schreibscope definiert | Spezifikations- und Oracle-Vertrag reservieren | `PLANNING` |
+| `CONTEXT_READY` | `CONTEXT_UNRESOLVED` | Verbindliche Basis oder Eintrittspunkt nicht feststellbar | Blockgrund persistieren | `BLOCKED` |
+| `DIAGNOSING` | `HYPOTHESIS_SUPPORTED` | Falsifizierbare Hypothese mit erforderlicher Runtime-Evidenz | Minimalen Patchplan mit Hypothesen-ID erzeugen | `PLANNING` |
+| `DIAGNOSING` | `DIAGNOSIS_UNRESOLVED` | Zulässige Untersuchungen erschöpft oder Evidenz unzureichend | Abbruchgrund ohne Erfolgsaussage persistieren | `BLOCKED` |
+| `PLANNING` | `PLAN_ADMITTED` | Scope/Budget/Oracle eingefroren, Schreib-Lease erteilt | Patch-ID anlegen, Effektabsicht in Outbox schreiben | `EXECUTING` |
+| `PLANNING` | `PLAN_REJECTED` | Eingriff unzulässig oder nicht durchführbar | Ergebnis begründen, keine Mutation | `BLOCKED` |
+| `EXECUTING` | `CANDIDATE_COMMITTED` | Candidate-SHA vorhanden, Lease gültig, PatchFSM=`TEST_PENDING`, keine offenen ungewissen Effekte | Prüflauf an genauem Commit + Oracle-Hash beauftragen | `VERIFYING` |
+| `EXECUTING` | `PATCH_REJECTED` | Patch hat nicht bestandene Vorprüfung, Budget übrig | Hypothese und Fehlversuch historisieren | `DIAGNOSING` |
+| `EXECUTING` | `WORKER_INTERRUPTED` | Worker-Ende, Timeout oder Lease-Verlust nachweisbar | Running-Effekt als ungewiss kennzeichnen, Recovery-Anstoß | `RECOVERING` |
+| `VERIFYING` | `VERIFICATION_PASS` | Fresh-checkout, unveränderter Candidate-SHA, Oracle-Hash, gleiche ursprüngliche Fehlerstrecke, Pflichtregression PASS, kein Effekt UNKNOWN, kein Discharge | Geschützten Acceptance-Receipt persistieren, Work finalisieren | `COMPLETED` |
+| `VERIFYING` | `VERIFICATION_FAIL` | PASS-Gate nicht erfüllt, weitere Reparatur autorisiert und Budget übrig | Fail-Receipt speichern und Hypothesen neu priorisieren | `DIAGNOSING` |
+| `VERIFYING` | `VERIFICATION_INCONCLUSIVE` | Prüfergebnis UNKNOWN/STALE oder nicht reproduzierbar | Evidence-Snapshot persistieren, soweit zulässig Ursachenklärung | `DIAGNOSING` |
+| `VERIFYING` | `BUDGET_EXHAUSTED` | Kein erlaubter Prüf-/Repair-Versuch mehr | Blockgrund speichern | `BLOCKED` |
+| `ADMITTED`, `CONTEXT_READY`, `DIAGNOSING`, `PLANNING`, `EXECUTING`, `VERIFYING`, `RECOVERING` | `TRAJECTORY_DISCHARGED` | Überwachungsbudget oder Revival erschöpft | Aktive Workeraktion sperren, Outbox sichern | `BLOCKED` |
+| `ADMITTED`, `CONTEXT_READY`, `DIAGNOSING`, `PLANNING`, `EXECUTING`, `VERIFYING`, `RECOVERING` | `EFFECT_UNKNOWN` | Ungeklärte bereits gestartete externe Mutation | Weiteren Dispatch sperren, Recovery erzwingen | `RECOVERING` |
+| `RECOVERING` | `RECONCILED_RESUME` | Externe Effekte geklärt, Lease erneuert, bestätigter Wiederaufnahmepunkt | Reconciled-Receipt schreiben, nächste Phase aus dem Journal wiederherstellen | `EXECUTING` oder `VERIFYING` entsprechend persistiertem `resume_target` |
+| `RECOVERING` | `RECONCILIATION_BLOCKED` | Unbekannter Effekt nicht aufklärbar, Freigabe fehlt oder Budget verbraucht | Ausstehende Aktionen suspendieren | `BLOCKED` |
+| `BLOCKED` | `REAUTHORIZE` | Neuer expliziter Owner-Auftrag mit neuer Work-ID | Neuen Auftrag starten, alter bleibt unverändert | neuer `ADMITTED`-Record |
+
+`COMPLETED` und `BLOCKED` sind für dieselbe Work-ID terminal. Eine neue Anweisung erzeugt eine neue Work-Revision oder Work-ID, nie eine stillschweigende Rückwärtsmutation. `RECONCILED_RESUME` ist kein nichtdeterministischer Zielwechsel: `resume_target` muss vorher als `EXECUTING` oder `VERIFYING` journalisiert worden sein.
 
 ### 6.3 FSM B: Diagnose und Hypothesen (`DiagnosisFSM`)
 
@@ -377,7 +381,7 @@ stateDiagram-v2
 | `NOT_REPRODUCED` | Ursache nicht nachgewiesen | Weitere zulässige Instrumentierung oder Blockierung |
 | `EVIDENCE_INSUFFICIENT` | Keine belastbare Diagnose | Keine spekulative Codeänderung |
 
-**SPARI-Parität:** Runtime Evidence Gate und Economy Gate werden als Eintritts- und Übergangsregeln abgebildet. Nach einer begrenzten Zahl widerlegter Diagnosezyklen wird `RECOMPOSE` ausgelöst: die Annahmen zum echten Entry-Point und zur aktiven Implementierung werden neu bewertet. Ein bereits widerlegter Ansatz wird nicht kommentarlos wiederholt.
+**Trace-first-Entscheidungslogik-Parität:** Runtime Evidence Gate und Economy Gate werden als Eintritts- und Übergangsregeln abgebildet. Nach einer begrenzten Zahl widerlegter Diagnosezyklen wird `RECOMPOSE` ausgelöst: die Annahmen zum echten Entry-Point und zur aktiven Implementierung werden neu bewertet. Ein bereits widerlegter Ansatz wird nicht kommentarlos wiederholt.
 
 ### 6.4 FSM C: Agenten-Trajectory (`TrajectoryFSM`)
 
@@ -392,28 +396,30 @@ stateDiagram-v2
 | `REVIVED` | Neuer zulässiger Lauf ab Checkpoint | Alter gescheiterter Tail bleibt historisiert |
 | `DISCHARGED` | Wiederherstellungsbudget verbraucht | Blockieren und begründen |
 
-**AppleMe-Parität:** AppleMe unterscheidet `ACTIVITY != PROGRESS` und differenziert `WORKER_CLAIMED`, `HARNESS_OBSERVED`, `EXTERNALLY_VERIFIED`. Die relevanten Detektoren, Probe-Regeln und Revival-Pakete werden übernommen. Die FSM basiert **nicht** auf privater Chain-of-Thought, sondern auf sichtbaren, versionierten Aktionen, Artefakten, Erfolgs-/Fehlersignalen und Budgetverbrauch [P03].
+**Trajectory-Assurance-Logik-Parität:** Trajectory-Assurance-Logik unterscheidet `ACTIVITY != PROGRESS` und differenziert `WORKER_CLAIMED`, `HARNESS_OBSERVED`, `EXTERNALLY_VERIFIED`. Die relevanten Detektoren, Probe-Regeln und Revival-Pakete werden übernommen. Die FSM basiert **nicht** auf privater Chain-of-Thought, sondern auf sichtbaren, versionierten Aktionen, Artefakten, Erfolgs-/Fehlersignalen und Budgetverbrauch.
 
 ### 6.5 FSM D: Patch-Lebenszyklus (`PatchFSM`)
 
-```mermaid
-stateDiagram-v2
-    [*] --> PROPOSED
-    PROPOSED --> ADMITTED: scope + authority + base SHA
-    ADMITTED --> APPLYING: exclusive lease
-    APPLYING --> CANDIDATE: edits written in isolated worktree
-    CANDIDATE --> REJECTED: policy / diff validation FAIL
-    CANDIDATE --> TEST_PENDING: change accepted for verification
-    TEST_PENDING --> VERIFIED: same-path PASS + regression evidence
-    TEST_PENDING --> REJECTED: bug remains / regression
-    TEST_PENDING --> INCONCLUSIVE: tester or oracle unknown
-    VERIFIED --> DELIVERED: artifact/PR prepared
-    REJECTED --> [*]
-    INCONCLUSIVE --> [*]
-    DELIVERED --> [*]
-```
+Patch-Identität und Kandidatenrevision sind **immutable**. Ein neuer Diff gegen einen anderen Commit erzeugt eine neue Patch-Revision bzw. Patch-ID; ein alter Verifikationsnachweis darf nicht auf die neue Revision übertragen werden.
 
-Patch und verifizierter Auftrag sind getrennte Zustände: Ein technisch korrekt erscheinender Diff kann Tests bestehen, während eine übergeordnete Anforderung noch offen ist. Ebenso darf ein geänderter Test nicht ohne unabhängigen Review einen originalen Fehltest ersetzen.
+| Zustand | Event | Guard | Aktion | Folgezustand |
+|---|---|---|---|---|
+| `NONE` | `PATCH_PROPOSED` | Work aktiv; Hypothesen-ID und Baseline-SHA vorhanden | Parent-SHA, erlaubten Scope, Patchplan fixieren | `PROPOSED` |
+| `PROPOSED` | `PATCH_ADMITTED` | Scope/Budget/Authority/Oracle-Baseline vollständig geprüft | Edit-Freigabe reservieren | `ADMITTED` |
+| `PROPOSED` | `PATCH_DENIED` | Scope, Autorität oder Sicherheitsprüfung fehlgeschlagen | Ablehnungsbeleg speichern | `REJECTED` |
+| `ADMITTED` | `EDIT_STARTED` | Exklusives gültiges Write-Lease, korrekter Parent-SHA und Worktree | Edit-Intent journalisieren, Workerauftrag freigeben | `APPLYING` |
+| `APPLYING` | `EDIT_FINISHED` | Mutationsbelege/Dateiliste vorhanden, Basis unverändert | Diff prüfen, Candidate-Commit erzeugen/identifizieren | `CANDIDATE` |
+| `APPLYING` | `EDIT_FAILED` | Edit-Fehler nachgewiesen | Differenz und ggf. unsicheren Effekt persistieren; kein blindes Zurücksetzen | `REJECTED` oder `INCONCLUSIVE` bei unsicherer Mutation |
+| `CANDIDATE` | `PATCH_PREFLIGHT_PASS` | Candidate-SHA stabil, erlaubter Scope, keine geschützten Oracle-Dateien verändert | Oracle-Hash und Candidate-SHA binden, Verifikationsauftrag erzeugen | `TEST_PENDING` |
+| `CANDIDATE` | `PATCH_PREFLIGHT_FAIL` | Unerlaubte Dateiänderung oder inkonsistenter Diff | Negativen Receipt erstellen | `REJECTED` |
+| `TEST_PENDING` | `VERIFY_PASS` | Externer Prüfer bestätigt ursprünglichen Reproducer und Pflichtregressionen am festgelegten SHA | Unabhängigen Receipt mit `candidate_sha` und `oracle_hash` schreiben | `VERIFIED` |
+| `TEST_PENDING` | `VERIFY_FAIL` | Ursprünglicher Fehler noch vorhanden oder Regression bewiesen | Fehlerdetails mit Nachweis persistieren | `REJECTED` |
+| `TEST_PENDING` | `VERIFY_UNKNOWN` | Flaky, Timeout, fehlende oder unsichere Prüfumgebung | Nicht als Erfolg klassifizieren | `INCONCLUSIVE` |
+| `TEST_PENDING`, `VERIFIED` | `CANDIDATE_CHANGED` | Aktueller Tree/Commit weicht vom geprüften SHA ab | Alle betroffenen Verifikationsreceipts STALE, neue Patch-Revision | `INCONCLUSIVE` (neue Patch-ID beginnt bei `PROPOSED`) |
+| `VERIFIED` | `DELIVERY_CONFIRMED` | Work-Completion-Gate bestanden, zulässiger Publication-Receipt | Lieferartefakt/PR referenzieren | `DELIVERED` |
+| `REJECTED`, `INCONCLUSIVE` | `RETRY_REQUESTED` | Neue Hypothese und frisches Budget | Neuen unabhängigen Patch aus Parent erzeugen, alten unverändert behalten | neue `PROPOSED`-Instanz |
+
+PatchFSM bewertet den **Patch**, WorkFSM den **ganzen Auftrag**. `VERIFIED` allein autorisiert keine Publikation und keinen Work-Abschluss. `REJECTED` bedeutet nicht, dass die bereits erzeugten Belege gelöscht werden dürfen.
 
 ### 6.6 FSM E: Verifikation (`VerificationFSM`)
 
@@ -442,9 +448,34 @@ PLANNED -> AUTHORIZED -> RESERVED -> DISPATCHED -> {CONFIRMED, FAILED, UNKNOWN}
                                              CONFIRMED        SUSPENDED
 ```
 
-`UNKNOWN` bedeutet, dass der Effekt nach dem Dispatch passiert sein **könnte**, der endgültige Ausgang aber nicht zweifelsfrei vorliegt. Eine Aktion mit externen Folgen darf dann **nicht blind erneut** ausgeführt werden. Bei Git-Push, PR-Erstellung, Deployment, DB-Migration und ähnlichen Effekten muss zuerst der reale externe Zustand abgefragt oder die Aktion sicher suspendiert werden. Das Muster entspricht der Produktgrenze und den Invarianten von PomeloMe [P05].
+`UNKNOWN` bedeutet, dass der Effekt nach dem Dispatch passiert sein **könnte**, der endgültige Ausgang aber nicht zweifelsfrei vorliegt. Eine Aktion mit externen Folgen darf dann **nicht blind erneut** ausgeführt werden. Bei Git-Push, PR-Erstellung, Deployment, DB-Migration und ähnlichen Effekten muss zuerst der reale externe Zustand abgefragt oder die Aktion sicher suspendiert werden. Das Muster entspricht der Produktgrenze und den Invarianten von Ausführungs- und Effektsteuerung.
 
-### 6.8 Invarianten über alle State Machines
+### 6.8 Kopplungsmatrix der sechs FSMs (normativ)
+
+Kein Automat ruft einen anderen direkt auf und kein Worker verändert die FSM-Tabellen. Der **C11 Event-Reducer** verarbeitet ein autorisiertes Eingangsevent, alle synchron ausgelösten Zustandsübergänge und den Outbox-Eintrag in **einer SQLite-Transaktion**. Die Tabelle beschreibt erzwungene Kopplungen.
+
+| Ursprung / Event | Betroffene FSMs | Konsistente Wirkung innerhalb einer DB-Transaktion |
+|---|---|---|
+| Work / `WORK_ADMIT` | Diagnosis, Trajectory, Patch, Verification, Effect | Fremdschlüssel-Basis und Initialzustände anlegen, noch keinen Worker starten |
+| Work / `FAILURE_OBSERVED` | Diagnosis, Verification | Diagnose initialisieren; Original-Reproducer und Baseline-Oracle vormerken |
+| Diagnosis / `HYPOTHESIS_SUPPORTED` | Work, Patch | Work nach `PLANNING`, Patch erst nach separat geprüftem Plan anlegen |
+| Patch / `EDIT_STARTED` | Work, Effect, Trajectory | Work `EXECUTING`; beabsichtigten Tool-Effect mit Lease und Budget reservieren; Run-Überwachung aktivieren |
+| Patch / `EDIT_FINISHED` | Patch, Verification | Candidate-SHA speichern; zuvor gültige Verification für andere Revisionen als `STALE` markieren |
+| Patch / `CANDIDATE_CHANGED` | Verification, Work | Verifikation zwingend `STALE`; Work darf nicht `COMPLETED` werden und muss zur erneuten Prüfung |
+| Verification / `VERIFY_PASS` | Patch, Work, Effect | Patch `VERIFIED`; Work nur bei **allen** Completion-Gates `COMPLETED`; Publication-Intent gesondert autorisieren |
+| Verification / `VERIFY_FAIL` | Patch, Diagnosis, Work | Patch `REJECTED`; Hypothese bei passendem Falsifier widerlegen; Work `DIAGNOSING` |
+| Verification / `VERIFY_UNKNOWN` | Patch, Work | Patch `INCONCLUSIVE`, keine positive Work-Abnahme |
+| Trajectory / `RECOVERY_RECOMMENDED` | Work, Effect | Work `RECOVERING`, laufende Effekte aufnehmen und gegen Remote-Zustand abgleichen |
+| Trajectory / `DISCHARGED` | Work, Effect | Work `BLOCKED` (oder aus `COMPLETED` keine Mutation); noch offene Effekte suspendieren |
+| Effect / `DISPATCHED_WITHOUT_RECEIPT` | Work, Patch | Effekt `UNKNOWN`, Work `RECOVERING`, Patch nicht `DELIVERED` |
+| Effect / `RECONCILE_CONFIRMED` | Work, Trajectory | Wiederaufnahme nur mit neuem Fencing-Token und journalisiertem `resume_target` |
+| Budget / `RESERVATION_DENIED` | Work, Effect, Trajectory | Kein neuer Worker- oder Tool-Dispatch; Work entweder `BLOCKED` oder bereits laufende Operation kontrolliert auslaufen lassen |
+
+**Feste Transaktionsreihenfolge:** (1) `BEGIN IMMEDIATE`; (2) Duplicate-Event-Prüfung und erwartete Revisionsnummern prüfen; (3) alle Guards gegen dieselbe Snapshot-Sicht prüfen; (4) Event immutable ins Journal einfügen; (5) auslösendes FSM-Update; (6) alle gekoppelten FSM-Updates und Stale-Invalidierungen; (7) Budget-/Lease-Reservierungen und Outbox-Intents; (8) Invarianten und zulässigen Abschlusszustand erneut prüfen; (9) `COMMIT`. Erst **nach Commit** darf der externe Dispatcher einen reservierten Effekt ausführen. Bei jeder Verletzung: `ROLLBACK`, ursprüngliche Daten unverändert, Fehler separat als neuer autorisierter Event erfassen.
+
+Die Wirkung außerhalb von SQLite (Git-Commit, Prozess, Netzaufruf, Dateisystem) kann nicht Teil derselben ACID-Transaktion sein. Sie benötigt Intent/Receipt/Reconciliation mit **nachweisbarer Effektidentität**. Bereits ausgeführte Aktionen bei `UNKNOWN` werden nicht blind erneut angestoßen. Ein im FS vorhandener Candidate-SHA ohne DB-Receipt wird bei Neustart nur als **unbestätigter Kandidat** nachinventarisiert.
+
+### 6.9 Invarianten über alle State Machines
 
 ```text
 I-01  WORKER_SAYS_DONE                  != VERIFIED
@@ -459,13 +490,18 @@ I-09  SOURCE_UNRESOLVED                 -> NO_VERSION_SENSITIVE_MUTATION
 I-10  ORIGINAL_FAILURE_NOT_RETESTED     -> REPAIR_NOT_VERIFIED
 I-11  WORKER_UNTRUSTED                  -> NO_SELF_CERTIFIED_ACCEPTANCE
 I-12  CRITICAL_ACTION_NOT_AUTHORIZED    -> NO_EFFECT
+I-13  TRAJECTORY_DISCHARGED              -> WORK_NOT_COMPLETED
+I-14  EFFECT_UNKNOWN                     -> WORK_NOT_COMPLETED
+I-15  COMPLETION_REQUIRED_ORACLE_HASH    == VERIFICATION_ORACLE_HASH
+I-16  COMPLETION_REQUIRED_CANDIDATE_SHA  == VERIFICATION_CANDIDATE_SHA
+I-17  FSM_COUPLED_UPDATES                 -> SAME_SQLITE_TRANSACTION
 ```
 
 Diese Invarianten sind **ausführbare Anforderungen**: Jeder Eintrag erhält deterministische Unit-Tests, Crash-Tests und adversarielle Gegenbeispiele. Sie werden nicht nur als Prompt-Anweisungen formuliert.
 
 ---
 
-### 6.9 CausalMap – navigierbare Ishikawa- und Ursachenbaum-Ansicht
+### 6.10 CausalMap – navigierbare Ishikawa- und Ursachenbaum-Ansicht
 
 **Modulname:** `CausalMap` (Root Cause Intelligence), intern `src/diagnosis/cause_map.c` und `include/kotze_cause_map.h`. **Eigentümer:** die Diagnose-Engine. Die spätere kontinuierliche Verbesserung verwendet dieselben Ursachendaten, betreibt aber keinen zweiten Graph-Store.
 
@@ -515,6 +551,7 @@ Das Diagramm zeigt *illustrative* mögliche Äste und keine festgestellten Ursac
 
 **Primärquellen:** ASQ, *Fishbone Diagram* (https://asq.org/quality-resources/fishbone), IHI, *Cause and Effect Diagram* (https://www.ihi.org/library/tools/cause-and-effect-diagram). Für die UI: React Flow, *Node-Based UIs in React* (https://reactflow.dev/), MIT-Lizenz. Die Quellen stützen die Visualisierungs- und Analysegrundidee, nicht eine bereits gemessene Erfolgsquote von KOTZE Agent.
 
+
 ---
 
 ## 7. Autonomous Repair Loop im Detail
@@ -533,7 +570,7 @@ Eingaben können ein GitHub-Issue, eine konkrete Nutzerbeschreibung, ein failing
 4. exakte vorherige Reparaturepisoden;
 5. erst bei Entscheidungslücken semantische Suche oder breitere Recherche.
 
-Die Reihenfolge operationalisiert SPARIs `Decision-changing evidence only` [P01–P02]. Große Codebasisindizes werden nicht aus Routine erzeugt.
+Die Reihenfolge operationalisiert des Trace-first-Ansatzes `Decision-changing evidence only`. Große Codebasisindizes werden nicht aus Routine erzeugt.
 
 ### 7.3 Reproduzieren und lokalisieren
 
@@ -551,7 +588,7 @@ Für komplexe Fälle dürfen parallele unabhängige Hypothesen von verschiedenen
 
 Der zuständige Coding-Worker erhält einen begrenzten Auftrag: bestätigter Fehlerpfad, Hypothese, erwartete Korrekturwirkung, einzuhaltende Schnittstellen und erlaubte Änderungspfade. Der Patch wird in einer isolierten Arbeitskopie erzeugt. Der Kernel prüft Version, Scope, Dateiliste, Binärdateien, unzulässige neue Abhängigkeiten, Auswirkungen auf Testdateien und die tatsächliche Write-Ownership.
 
-**Minimaler Patch** bedeutet nicht „möglichst wenige Zeichen“. Wenn die nachgewiesene Ursache eine Schnittstellenkorrektur oder Datenmigration erfordert, darf die fachlich richtige Änderung größer sein. SPARIs Regel lautet: **kleinstes ausreichendes, architekturkonformes Delta am echten Ausführungspfad**.
+**Minimaler Patch** bedeutet nicht „möglichst wenige Zeichen“. Wenn die nachgewiesene Ursache eine Schnittstellenkorrektur oder Datenmigration erfordert, darf die fachlich richtige Änderung größer sein. des Trace-first-Ansatzes Regel lautet: **kleinstes ausreichendes, architekturkonformes Delta am echten Ausführungspfad**.
 
 ### 7.6 Verifikation und unabhängiges Urteil
 
@@ -591,11 +628,11 @@ Eine `RepairEpisode` speichert: Ausgangsfehler, Basisrevision, Reproducer, ausge
 | `EXTERNALLY_VERIFIED` | Separater, autorisierter Prüfer mit reproduzierbarer Observation | Kann Akzeptanzkriterium erfüllen |
 | `UNKNOWN` | Fehlendes oder widersprüchliches Ereignis | Muss offen bleiben; kein impliziter PASS |
 
-AppleMe verwendet bereits die ersten drei Klassen; KOTZE übernimmt die Semantik und ergänzt die feste Bindung an Patch-, Tester- und Baseline-Revisionen [P03–P04]. **Ein Hash belegt Unverändertheit eines aufgezeichneten Werts, nicht von sich aus seine inhaltliche Wahrheit.**
+Trajectory-Assurance-Logik verwendet bereits die ersten drei Klassen; KOTZE übernimmt die Semantik und ergänzt die feste Bindung an Patch-, Tester- und Baseline-Revisionen. **Ein Hash belegt Unverändertheit eines aufgezeichneten Werts, nicht von sich aus seine inhaltliche Wahrheit.**
 
 ### 8.4 Deterministisches Gedächtnis vor Vektorsuche
 
-Zuerst SQL-Indizes nach `repo`, `symbol`, `failure_signature`, `base_sha`, `test_id`, `patch_id`. Nur wenn diese Treffer fehlen, semantische Retrieval-Kandidaten (z. B. über eine optionale FruitStack-Integration). Treffer sind **Erinnerungshinweise**, keine Ursachenbeweise. Eine ähnliche alte Reparatur darf nach API- oder Versionsänderungen nie stillschweigend als gültig gelten.
+Zuerst SQL-Indizes nach `repo`, `symbol`, `failure_signature`, `base_sha`, `test_id`, `patch_id`. Nur wenn diese Treffer fehlen, semantische Retrieval-Kandidaten (z. B. über eine optionale vorhandener Agenten-Stack-Integration). Treffer sind **Erinnerungshinweise**, keine Ursachenbeweise. Eine ähnliche alte Reparatur darf nach API- oder Versionsänderungen nie stillschweigend als gültig gelten.
 
 ---
 ## 9. Ausführungsmodell, Coding-Worker und Worker-Recovery
@@ -609,30 +646,34 @@ Ein einfacher, unmittelbar steuerbarer Coding-Worker wird auf kleine, klar begre
 | Profil | Auslöser | Orchestrierung | Sollwert |
 |---|---|---|---|
 | `FAST_REPAIR` | eindeutiger Reproducer, Scope klein, geringes Risiko | ein Worker, gezielter Test | schnellster belastbarer Fix |
-| `TRACE_REPAIR` | unklare Laufzeitursache | SPARI-Pfad, gezielte Diagnose | erste konkrete Fehlbedingung |
+| `TRACE_REPAIR` | unklare Laufzeitursache | Trace-first-Entscheidungslogik-Pfad, gezielte Diagnose | erste konkrete Fehlbedingung |
 | `RECOMPOSE` | Hypothesen widerlegt oder falscher Codepfad | Kontext-/Entry-Point-Korrektur | keine spekulativen Patch-Ketten |
 | `INDEPENDENT_REVIEW` | kritische API, Datenintegrität, Security | separater Verifier, ggf. zweites Modell | unabhängige Abnahme |
 | `PARALLEL_SEARCH` | mehrere plausible Ursachen, große Unsicherheit, hoher Reparaturwert | isolierte Arbeitskopien, mehrere Hypothesen | zusätzlicher Erkenntnisgewinn pro Kosten |
 | `LONG_HORIZON` | umfangreiche Feature-Kette oder Repo-Migration | persistente Teilaufgaben, Checkpoints | langfristige Kohärenz |
 
-**Kein starrer Token-Schwellwert** wird als wissenschaftlich begründet behauptet. Escalation-Kosten sind über reale Messungen und Aufgabenklassen zu kalibrieren. SPARIs Economy Gate kann dafür als direkte Vorlage dienen [P02].
+**Kein starrer Token-Schwellwert** wird als wissenschaftlich begründet behauptet. Escalation-Kosten sind über reale Messungen und Aufgabenklassen zu kalibrieren. des Trace-first-Ansatzes Economy Gate kann dafür als direkte Vorlage dienen.
 
 ### 9.3 Worker Adapter Contract
 
-Die Adapter bieten logisch wenige Funktionen:
+**MVP-Entscheidung:** Ein **eigener minimaler Single-Step-Worker** ist der erste ausführbare Vergleichsarm. Das Sprachmodell schlägt eine strukturierte Aktion vor, aber **nur der C-Kern** prüft Autorisierung, Scope, Ressourcen, Modell-/Toolbudget und führt sie kontrolliert aus. Der Worker erhält den toolgebundenen Exit-Code, stderr/stdout und Artefakthashes; ein modellausgegebenes "Erfolg" bleibt `WORKER_CLAIMED`.
 
-- `start`: gebundene Ausführung für einen konkreten `work_id`/`workspace_id`.
-- `resume`: nur mit gespeichertem Session-/Turn-Identifier, nicht „letzte Session“.
-- `steer`: neue Information an denselben kontrollierten Lauf binden.
-- `interrupt`: laufende Aktion kontrolliert unterbrechen.
-- `observe`: strukturierte Tool-/Status-/Artefakt-Ereignisse liefern.
-- `shutdown`: temporäre Worker-Ressourcen kontrolliert beenden.
+| Operation / Eingabe | Kerngeprüfte Grenze | Beobachtbares Ergebnis |
+|---|---|---|
+| `READ_FILE(path)` | Repository-Pfad relativ, realpath/openat-Schutz, erlaubter Read-Scope | Content-Hash, Lesestatus |
+| `SEARCH(query, scope)` | Begrenzte Dateimenge und Outputlimit, keine unbegrenzten Reindexierungen | Treffer mit Source-Locator |
+| `RUN_TOOL(argv,cwd,env,timeout)` | **argv als Array, keine Shell-Interpolation**; Allowlist/OS-Sandbox, env-Whitelist, Deadline | exit code, stdout/stderr hashes, tatsächlicher Prozess-Receipt |
+| `APPLY_EDIT(base_sha,patch)` | Exklusives Lease, erlaubter Pfad, Basisdatei-Hash, keine Änderung geschützter Orakel | Candidate-Hash, Diff, edit receipt |
+| `CHECKPOINT()` | Commit auf isoliertem Worktree, Content-/Scope-Prüfung | Immutable Git-SHA |
+| `REQUEST_VERIFICATION(candidate_sha,oracle_hash)` | Kein Selbsttest als Abschlussnachweis; separater Verifier | Prüflauf-ID; später PASS/FAIL/UNKNOWN |
 
-Der bekannte **Codex Session Controller v2.0** beschreibt bereits persistente Codex-Threads, exakte Session-Identität, Live Steering, Single Writer, Recovery und unabhängige Diff-Prüfung [P08]. KOTZE übernimmt die **nötige Interoperabilität**, muss diesen Controller aber nicht als eigenen permanenten externen Dienst erfordern.
+**Wichtig:** Auch ein Host-kontrollierter `argv`-Prozess kann schädliche Kommandos ausführen. Die Umhüllung ist keine Sandbox. Ein Prozess mit Shell/Interpreter-Zugriff benötigt zusätzlich eine geprüfte OS-Isolation, eingeschränktes Dateisystem, Netzwerk- und Ressourcenpolicy. `HARNESS_OBSERVED` beweist, **welchen Befehl der Host ausgeführt und was er zurückgeliefert hat**, nicht automatisch die Semantik seiner Wirkung.
+
+**Spätere Black-Box-Worker:** Externe Coding-CLIs dürfen erst nach dem Minimal-Worker als getrennte Vergleichsarme erscheinen. Hooks sind Telemetrie, **keine Sicherheitsgrenze**. Sie laufen in einer OS-Sandbox; der KOTZE-Host misst Worktree-/Commit-Änderungen, Prozess-Exit, erlaubte Dateien und gegebenenfalls kontrollierte Netzwerkeffekte. Nicht einsehbare interne Toolhandlungen erhalten niemals automatisch `HARNESS_OBSERVED`. Ohne zuverlässig isolierte Ausführung bleibt der Black-Box-Modus deaktiviert.
 
 ### 9.4 Vermeidung des „Agent babysitting“
 
-Der Worker erhält zu Beginn einen konkreten Arbeitsvertrag und autonome Zwischenentscheidungsrechte innerhalb seines Budgets. AppleMe-artige Assurance reagiert auf **objektiv wiederkehrende Muster**, nicht auf jede triviale Abweichung. Ein Probe kann eine falsche Hypothese korrigieren, ohne sofort einen teuren Session-Neustart auszulösen. Wenn der Worker auf einen anderen Ansatz umschwenkt, wird der bestätigte Kontext erhalten; entwertete Teile werden nicht erneut als Tatsache eingeblendet.
+Der Worker erhält zu Beginn einen konkreten Arbeitsvertrag und autonome Zwischenentscheidungsrechte innerhalb seines Budgets. Trajectory-Assurance-Logik-artige Assurance reagiert auf **objektiv wiederkehrende Muster**, nicht auf jede triviale Abweichung. Ein Probe kann eine falsche Hypothese korrigieren, ohne sofort einen teuren Session-Neustart auszulösen. Wenn der Worker auf einen anderen Ansatz umschwenkt, wird der bestätigte Kontext erhalten; entwertete Teile werden nicht erneut als Tatsache eingeblendet.
 
 ### 9.5 Reale Wiederaufnahme
 
@@ -644,33 +685,45 @@ Crash-Recovery kann nur so stark sein wie die Kontrollschnittstelle des Provider
 
 ### 10.1 Durable Journal
 
-Der C11-Kern verwendet transaktional geschriebene Tabellen bzw. Entitäten wie:
+Der C11-Kern speichert fachliche Identitäten, Zustände und unveränderliche Belege. Das folgende **logische Mindest-Datenmodell** ist verbindlich für das erste Migration-Schema; konkrete SQL-Typen und zusätzliche Indizes werden anhand der SQLite-Version fixiert.
 
-```text
-work             work_id | repo_id | base_sha | status | revision
-object           object_id | object_kind | stable_locator | revision
-run              run_id | work_id | worker_id | session_id | status
-lease            lease_id | work_id | resource | owner | expires_at | fencing_token
-hypothesis       hypothesis_id | work_id | status | prediction | evidence_ref
-patch            patch_id | work_id | parent_sha | candidate_sha | state
-verification     verification_id | patch_id | check_id | result | provenance
-observation      event_id | run_id | type | observed_at | payload_hash
-budget           budget_id | limit | reserved | consumed | state
-outbox           effect_id | kind | target | state | idempotency_key
-repair_episode   episode_id | failure_signature | context_refs | outcome
-```
+| Tabelle | Pflichtfelder (zusätzlich zu Primärschlüssel und Zeitstempeln) | Integritätsregel |
+|---|---|---|
+| `work` | `work_id`, `repo_id`, `base_sha`, `oracle_hash`, `status`, `revision`, `resume_target` | Work-ID eindeutig; Revision monoton; terminale Zustände nicht rückwirkend editieren |
+| `object` | `object_id`, `object_kind`, `stable_locator`, `revision` | Locator normalisiert und eindeutig je Object-Kind |
+| `run` | `run_id`, `work_id`, `worker_id`, `session_id`, `state`, `lease_fencing_token` | Work/Session-FK, keine veralteten Fencing-Token |
+| `trajectory` | `trajectory_id`, `work_id`, `run_id`, `status`, `last_good_event_id`, `probe_state`, `revival_count`, `revival_budget` | Ein aktiver Zustandsdatensatz pro Run/Watcher; Histories append-only |
+| `lease` | `lease_id`, `work_id`, `resource`, `owner`, `expires_at`, `fencing_token` | Ein aktiver Writer pro Resource; Token monoton |
+| `hypothesis` | `hypothesis_id`, `work_id`, `status`, `prediction`, `falsifier`, `evidence_ref`, `attempt` | Refuted nur mit Prüfbeleg; keine geheime Reasoning-Kette |
+| `patch` | `patch_id`, `work_id`, `parent_sha`, `candidate_sha`, `state`, `scope_hash`, `hypothesis_id`, `revision` | Candidate-SHA nach Festlegung unveränderlich |
+| `verification` | `verification_id`, `work_id`, `patch_id`, `candidate_sha`, `oracle_hash`, `check_id`, `result`, `provenance`, `reproducer_hash`, `repetition_outcomes` | PASS nur bei passendem SHA/Hash und autorisierter Provenienz |
+| `observation` | `event_id`, `run_id`, `type`, `observed_at`, `payload_hash`, `producer`, `provenance` | Event-ID dedupliziert, Quelle attestiert |
+| `budget` | `budget_id`, `work_id`, `parent_budget_id`, `limit`, `reserved`, `consumed`, `state`, `currency_or_unit` | Hierarchischer FK und atomare Reservierung; Summe der Child-Reservierungen begrenzt |
+| `outbox` | `effect_id`, `work_id`, `kind`, `target`, `state`, `idempotency_key`, `attempt`, `last_probe_at`, `fencing_token`, `receipt_ref` | Intent vor Dispatch, genau eine logische Effektidentität; UNKNOWN gesondert behandeln |
+| `repair_episode` | `episode_id`, `work_id`, `failure_signature`, `context_refs`, `hypothesis_refs`, `outcome`, `evidence_refs` | Kompakte Trajektorie statt vollständiger, unkontrollierter Chats |
+| `reproducer` | `reproducer_id`, `work_id`, `base_sha`, `oracle_hash`, `payload_hash`, `frozen_at`, `k`, `n`, `runtime_fingerprint` | Freeze vor dem ersten Patch; Änderungen erzeugen neue Oracle-Version |
+| `event_journal` | `event_id`, `work_id`, `actor`, `event_type`, `occurred_at`, `payload_hash`, `prev_hash`, `row_hash` | Append-only; Revisionsprüfungen und Deduplizierung |
 
-Die genaue Tabellenstruktur wird erst nach Prüfung der vorhandenen AppleMe-/SPARI-Modelle festgeschrieben. Tabellenlisten sind hier **Datenverträge**, noch kein Migrationsskript.
+FKs werden aktiviert (`PRAGMA foreign_keys=ON`), WAL mit dokumentierter Sync-Policy eingesetzt, und nicht nur auf Fehlerschemaskalen, sondern auch auf referenzieller Konsistenz und Crash-Recovery geprüft [R24]. Die Hash-Kette dient der **Nachvollziehbarkeit**, nicht dem Schutz vor einem kompromittierten Datenbank-Owner.
 
 ### 10.2 Crash-Sicherheit
 
-Drei Kategorien müssen unterschieden werden:
+Der **Mindestumfang** der deterministischen Crash-Point-Evaluation ist die folgende Matrix. Jede Zeile benötigt einen lokalen Fault-Injection-Test mit Datenbank-Reopen, Journal-Replay, Worktree-Inspektion und eindeutig erwarteter Wiederaufnahme.
 
-- **Pure Transition:** deterministische Entscheidung ohne externen Effekt; nach Reboot über den Journal-Stand wiederholbar.
-- **Idempotent Effect:** erneuter Aufruf nur mit stabilem Idempotency-Key und zuverlässiger externer Deduplizierung.
-- **Unknown External Effect:** ein Aufruf könnte bereits ausgeführt worden sein; zuerst `probe/reconcile`, sonst `SUSPENDED`.
+| Crash-Point | Persistierter Zustand | Erwartete Wiederaufnahme / Verbot |
+|---|---|---|
+| C01 nach Journal-Commit, vor Dispatcher-Start | `RESERVED`, Outbox vorhanden | Effekt nach Reconcile erstmals dispatchen; keine Verdopplung |
+| C02 direkt nach externem Dispatch, vor Receipt | `DISPATCHED`/`UNKNOWN` | Remote-Status prüfen; niemals blinder Replay |
+| C03 während Worker-Prozess läuft | Lease/Run noch aktiv oder stale | Prozessstatus prüfen, Fencing-Token erneuern, alten Writer blockieren |
+| C04 nach Patch-Dateiänderungen, vor Git-Commit | Worktree inkonsistent | Diff sichern; nicht unbemerkt übernehmen |
+| C05 nach Git-Commit, vor SQLite-Record | Candidate-SHA außerhalb DB vorhanden | SHA als unbestätigt rekonstruieren; Prüfrechte neu anwenden |
+| C06 nach Candidate-Persistenz, vor Verifikationsstart | `TEST_PENDING`, outbox reserviert | Fresh-checkout-Verifikation einmal autorisieren |
+| C07 während Verifikation | `RUNNING` ohne Abschluss-Receipt | Ergebnis UNKNOWN; neuen Lauf mit exakt gleichem Oracle und SHA beauftragen |
+| C08 nach Prüfprozess, vor SQLite-Receipt | Möglicher PASS, aber keine dauerhafte Evidenz | Nicht PASS behaupten; originalen Check erneut ausführen |
+| C09 nach PASS-Receipt, vor Work-Abschluss | Patch `VERIFIED`, Work nicht `COMPLETED` | Vollständiges Gate idempotent erneut prüfen und finalisieren |
+| C10 nach PR-/Push-Dispatch, vor Empfang der API-Antwort | Externer Effekt ungewiss | Ziel-Ref / PR anhand stabiler Identität abfragen; kein blindes Zweit-Push |
 
-Die zentrale Zusicherung lautet daher **keine unbeabsichtigte Doppelwirkung unter dem dokumentierten Effektmodell**, **nicht** das pauschale Versprechen universellen Exactly-once-Verhaltens über beliebige Fremdsysteme hinweg. Eine Git-Push-Antwort kann verloren gehen, obwohl der Push erfolgreich war; KOTZE muss den Remote-Ref nachprüfen, statt blind erneut dieselbe Änderung zu veröffentlichen.
+**Kein Schein-Exactly-once:** Eine lokale SQLite-Transaktion kann externe Effekte nicht atomar committen. KOTZE stellt stattdessen *at-most-once without blind replay under uncertainty* und Reconciliation bereit. Für irreversible Effekte ohne zuverlässige Abfrage ist `SUSPENDED` der einzig zulässige automatische Ausgang. Das ist ein begrenzter, überprüfbarer Sicherheitsvertrag, keine universelle Exactly-once-Garantie.
 
 ### 10.3 Hierarchische Budgets
 
@@ -683,7 +736,7 @@ Jeder Auftrag enthält zulässige Grenzen für:
 - Zahl fehlgeschlagener Hypothesen und Revival-Zyklen;
 - Zahl und Art schreibender externer Effekte.
 
-**Budgetvererbung muss atomar sein:** Ein Hauptauftrag mit N Token darf bei drei parallelen Unteraufträgen nicht drei vollständige Kopien von N ausgeben. Der C-Kern reserviert die Obergrenze **vor** der Dispatch-Freigabe. Unbekannte Providerkosten oder unvollständige Receipts werden als `UNKNOWN`, nicht als kostenlos verbucht. Das folgt dem Grundprinzip hierarchischer Parent-Budgets aus dem bestehenden PomeloMe-Kern [P05] und adressiert bekannte Parallel-Accounting-Fehlermuster.
+**Budgetvererbung muss atomar sein:** Ein Hauptauftrag mit N Token darf bei drei parallelen Unteraufträgen nicht drei vollständige Kopien von N ausgeben. Der C-Kern reserviert die Obergrenze **vor** der Dispatch-Freigabe. Unbekannte Providerkosten oder unvollständige Receipts werden als `UNKNOWN`, nicht als kostenlos verbucht. Das folgt dem Grundprinzip hierarchischer Parent-Budgets aus dem bestehenden Ausführungs- und Effektsteuerung-Kern und adressiert bekannte Parallel-Accounting-Fehlermuster.
 
 ### 10.4 Kein kostenpflichtiger CI-Default
 
@@ -711,7 +764,7 @@ Ein Prompt kann einen Coding-Worker auffordern, nur erlaubte Dateien zu ändern.
 
 ### 11.3 Secrets und Datenschutz
 
-KOTZE soll niemals komplette `.env`-, Datenbank- oder Zugangsdaten in frei zugängliche Modellkontexte kopieren. Sensitive Werte werden über kurze, scopespezifische Handles und hostkontrollierte Auflösung bereitgestellt. **BlueberryMe** kann hierfür optional als Donor/Schnittstelle dienen [P09]; ein harter FruitStack-Zwang wird vermieden. Logs und Evidence-Artefakte erhalten Privacy-Klassifikation und Retention-Regeln.
+KOTZE soll niemals komplette `.env`-, Datenbank- oder Zugangsdaten in frei zugängliche Modellkontexte kopieren. Sensitive Werte werden über kurze, scopespezifische Handles und hostkontrollierte Auflösung bereitgestellt. **Datenschutz-Gateway** kann hierfür optional als Donor/Schnittstelle dienen; ein harter vorhandener Agenten-Stack-Zwang wird vermieden. Logs und Evidence-Artefakte erhalten Privacy-Klassifikation und Retention-Regeln.
 
 ### 11.4 Selbstmodifikation des Agenten
 
@@ -733,7 +786,7 @@ Die Aufnahme externen Codes erfordert Quellrevision, Original-Lizenz, Copyright-
 - **SQLite:** Public Domain [R24].
 - **Tree-sitter:** MIT-Lizenz [R26].
 - **libgit2:** GPLv2 mit spezieller Linking Exception; Modifikationen an libgit2 selbst sind gesondert zu behandeln [R25].
-- **SPARI/AppleMe und private FruitStack-Repositories:** Eigentümerschaft und Freigabestatus werden getrennt geprüft; keine Übernahme privater Betriebsgeheimnisse in öffentliche Repositories ohne ausdrückliche Entscheidung.
+- **Trace-first-Entscheidungslogik/Trajectory-Assurance-Logik und private vorhandener Agenten-Stack-Repositories:** Eigentümerschaft und Freigabestatus werden getrennt geprüft; keine Übernahme privater Betriebsgeheimnisse in öffentliche Repositories ohne ausdrückliche Entscheidung.
 
 ---
 
@@ -743,8 +796,8 @@ Die folgenden Aussagen sind **testbare Hypothesen**, keine schon nachgewiesenen 
 
 | Hypothese | Minimaler Eingriff | Erwartete Wirkung | Falsifikation |
 |---|---|---|---|
-| **H1: Trace-first** | SPARI-Repair-Entscheidungsregeln als C-FSM | Weniger irrelevante Dateisuche, schnellere Root-Cause-Findung | Kein Unterschied gegenüber gleicher Baseline auf echten Fehlern |
-| **H2: Trajectory Assurance** | AppleMe-Detektoren und Probe/Revival | Weniger Endlosschleifen und Scheinfortschritt | Mehr False Positives oder gleiche Endquote bei höheren Kosten |
+| **H1: Trace-first** | Trace-first-Entscheidungslogik-Repair-Entscheidungsregeln als C-FSM | Weniger irrelevante Dateisuche, schnellere Root-Cause-Findung | Kein Unterschied gegenüber gleicher Baseline auf echten Fehlern |
+| **H2: Trajectory Assurance** | Trajectory-Assurance-Logik-Detektoren und Probe/Revival | Weniger Endlosschleifen und Scheinfortschritt | Mehr False Positives oder gleiche Endquote bei höheren Kosten |
 | **H3: Targeted Tests** | TestPrune-artige Testauswahl über vorhandene Testframeworks | Schnellere Iteration, höhere Reparaturqualität pro Kosten | Mehr übersehene Regressionen / kein Nettoeffekt |
 | **H4: Elision First** | Deterministische Kürzung großer Tool-Outputs | Weniger Kontextüberlauf und Inferenzkosten | Verlust relevanter Beobachtungen / sinkende Lösungsquote |
 | **H5: Independent Verifier** | Separater Test-/Akzeptanzprozess je Patch | Weniger falsch-positive DONE-Meldungen | Kein Gewinn bei Fehlerentdeckung / erheblicher Overhead |
@@ -787,7 +840,7 @@ Eine neue Komponente wird nur zugelassen, wenn sie mindestens eine konkrete, mes
 | Full-stack-Neuentwicklung | E2E-SWE | vollständig installierbare, getestete Codebasis |
 | Langzeit-Weiterentwicklung | Multi-step SWE | vollständige Kette erfolgreich |
 | Progressive Optimierung | CodeClash | messbarer Zielgewinn bei stabilem Code |
-| Agentenpathologien | AppleMe-Szenarien und echte Trajektorien | Precision, Recall, falsche Revivals, Zeit bis Intervention |
+| Agentenpathologien | Trajectory-Assurance-Logik-Szenarien und echte Trajektorien | Precision, Recall, falsche Revivals, Zeit bis Intervention |
 | Crash-Recovery | deterministische Fault Injection im C-Kern | keine doppelte Wirkung, korrekte Zustandsrekonstruktion |
 | Wirtschaftlichkeit | aggregierte Provider-/Test-/Systemreceipts | Kosten pro unabhängig erfolgreichem Task |
 
@@ -797,10 +850,10 @@ Die Evaluation muss die Wirkung kleiner Zusatzmechanismen sichtbar machen:
 
 | Arm | Konfiguration | Zweck |
 |---|---|---|
-| `A0` | Coding-Worker + minimaler sicherer Ausführungsadapter | echte Baseline |
-| `A1` | A0 + SPARI-Port | Effekt der Diagnoseführung |
-| `A2` | A0 + AppleMe-Port | Effekt der Trajectory-Assurance |
-| `A3` | A0 + SPARI + AppleMe | Wechselwirkung der Donoren |
+| `A0` | Host-kontrollierter Minimal-Worker + minimaler sicherer Ausführungsadapter | echte Baseline |
+| `A1` | A0 + Trace-first-Entscheidungslogik-Port | Effekt der Diagnoseführung |
+| `A2` | A0 + Trajectory-Assurance-Logik-Port | Effekt der Trajectory-Assurance |
+| `A3` | A0 + Trace-first-Entscheidungslogik + Trajectory-Assurance-Logik | Wechselwirkung der Donoren |
 | `A4` | A3 + targeted tests / context elision | Effizienzgewinn |
 | `A5` | A4 + structured episodes / adaptive escalation | Learning und Budgetsteuerung |
 | `A6` | A5 + regulierte Harness-Optimierung | Held-out-Generalisation |
@@ -835,7 +888,7 @@ Ein Modellwechsel während eines Vergleichs macht die kausale Zuordnung ungülti
 
 **Assurance:**
 
-- Precision/Recall der AppleMe-Detektoren an gelabelten Trajektorien.
+- Precision/Recall der Trajectory-Assurance-Logik-Detektoren an gelabelten Trajektorien.
 - Negative Kontrollfälle (langsam, aber produktiv; flaky, aber konvergent).
 - Verifikationsprovenienz und Anzahl `INCONCLUSIVE`-Fälle.
 
@@ -843,9 +896,9 @@ Ein Modellwechsel während eines Vergleichs macht die kausale Zuordnung ungülti
 
 Ein Agent darf nicht die Benchmarkaufgaben oder die geheimen Prüfkriterien seiner eigenen Evaluation verändern. Aufgaben werden in `TRAIN` (Harness-Optimierung) und `HELD_OUT` (unabhängige Überprüfung) getrennt. Eine Verbesserung, die lediglich die gelesenen Aufgabenbeispiele memorisiert, darf nicht in die Standardkonfiguration gelangen. Die Unabhängigkeit der Bewertung ist stärker als eine zusätzliche Modellmeinung.
 
-### 13.5 Nutzung des existierenden FruitStack-Eval
+### 13.5 Nutzung des existierenden unabhängige Evaluationsinstrumentierung
 
-Das Repository **FruitStack-Eval** implementiert beziehungsweise beschreibt bereits externe Auswertung, Ablationen, Drift-/Budget-/Evidence-Checks und Replay-Funktionen [P10]. Seine Prinzipien sollten für KOTZE übernommen werden. Die KOTZE-Auswertung muss aber **als eigenständiger Evaluator außerhalb des Produktkerns** laufen, damit der getestete Agent nicht selbst seinen Erfolg benotet.
+Das Repository **unabhängige Evaluationsinstrumentierung** implementiert beziehungsweise beschreibt bereits externe Auswertung, Ablationen, Drift-/Budget-/Evidence-Checks und Replay-Funktionen. Seine Prinzipien sollten für KOTZE übernommen werden. Die KOTZE-Auswertung muss aber **als eigenständiger Evaluator außerhalb des Produktkerns** laufen, damit der getestete Agent nicht selbst seinen Erfolg benotet.
 
 **Wichtig:** Früher deklarierte Tests oder Eval-Pipelines sind keine bereits ausgeführten Produktionsnachweise. Das Konzept fordert die **Durchführung** unabhängiger Vergleiche, behauptet sie nicht.
 
@@ -874,27 +927,27 @@ Ein solcher Task ist wesentlich aussagekräftiger als eine synthetische Fehlerme
 
 **Ziel:** Keine Architektur auf veralteten oder unvollständig gelesenen Donorversionen aufbauen.
 
-**Arbeiten:** Alle tatsächlich erforderlichen SPARI-/AppleMe-Quellmodule, Tests, Schemas und öffentlichen API-Kontrakte inventarisieren. Auf exakte Commit-SHAs pinnen. Scope für C-Port vs. Adapter festlegen. Öffentliche und private Herkunft trennen. Die vorhandenen Codex-Controller-/PeachMe-/PomeloMe-Kontrakte nur in dem Umfang lesen, der einen konkreten Integrationsentscheid beeinflusst.
+**Arbeiten:** Alle tatsächlich erforderlichen Repair-/Assurance-Quellmodule, Tests, Schemas und öffentlichen API-Kontrakte inventarisieren. Auf exakte Commit-SHAs pinnen. Scope für C-Port vs. Adapter festlegen. Öffentliche und private Herkunft trennen. Die vorhandenen Codex-Controller-/Session-Kontrollschicht-/Ausführungs- und Effektsteuerung-Kontrakte nur in dem Umfang lesen, der einen konkreten Integrationsentscheid beeinflusst.
 
 **DoD:** Vollständige `PARITY_MATRIX`, überprüfte Quellen-/Lizenzmatrix, benannte Testfälle und enger MVP-Vertrag; **noch kein neuer Orchestrator**.
 
 ### Phase 1 – Eigenständiger C11-Kontrollkern
 
-**Ziel:** Der Agentenlebenszyklus funktioniert ohne laufenden FruitStack-Dienst.
+**Ziel:** Der Agentenlebenszyklus funktioniert ohne laufenden vorhandener Agenten-Stack-Dienst.
 
 **Arbeiten:** `WorkFSM`, `EffectFSM`, SQLite-Journal, Work-ID, exakter Base-SHA, ein Workspace-Schreib-Lease, ein Worker-Adapter, Budget-/Deadline-Gates, Reconcile-Befehl.
 
 **DoD:** Nach jedem definierten Crash-Point rekonstruiert der C-Kern den zulässigen Zustand. Gleiche Eingangsereignisse erzeugen keine Doppelaufträge. Effekte mit ungewissem Ergebnis werden nicht blind wiederholt.
 
-### Phase 2 – SPARI- und AppleMe-Kern in KOTZE
+### Phase 2 – Trace-first-Entscheidungslogik- und Trajectory-Assurance-Logik-Kern in KOTZE
 
 **Ziel:** Integrierte trace-first-Diagnose und Trajectory-Assurance.
 
 **Arbeiten:** Runtime Evidence Gate, Economy-Entscheidung, Hypothesenstatus, Same-path-Retest; Loop-/No-Progress-/Thrashing-Detektoren, Probes und Revival-Pakete. Relevante Donor-Tests als Paritätsfälle portieren und negative Kontrollen ergänzen.
 
-**DoD:** Kein externer SPARI-/AppleMe-Dienst nötig; die gewählten Donor-Eigenschaften werden von eigenen KOTZE-Tests belegt. Abweichungen sind ausdrücklich dokumentiert.
+**DoD:** Kein externer Repair-/Assurance-Dienst nötig; die gewählten Donor-Eigenschaften werden von eigenen KOTZE-Tests belegt. Abweichungen sind ausdrücklich dokumentiert.
 
-### Phase 3 – Vollständiger autononomer Repair-Zyklus
+### Phase 3 – Vollständiger autonomer Repair-Zyklus
 
 **Ziel:** Ein realer Fehler wird Ende-zu-Ende autonom behoben.
 
@@ -922,7 +975,7 @@ Ein solcher Task ist wesentlich aussagekräftiger als eine synthetische Fehlerme
 
 **Ziel:** KOTZE kann über ausdrücklich konfigurierte Trigger und Rechte selbstständig an mehreren Projekten arbeiten.
 
-**Arbeiten:** Event-Adapter für GitHub, CI-Log-Ingestion, optional Monitoring, IDE und Dashboard. Optional vorhandene Aurora-/AnanasMe-/MangoMe-/PlumMe-Schnittstellen anbinden, ohne sie für den Kernbetrieb vorauszusetzen.
+**Arbeiten:** Event-Adapter für GitHub, CI-Log-Ingestion, optional Monitoring, IDE und Dashboard. Optional vorhandene UI-/Kommunikations-/persistenter Arbeitszustand-/Modellversorgung-Schnittstellen anbinden, ohne sie für den Kernbetrieb vorauszusetzen.
 
 **DoD:** Gleichwertiger Offline-/lokaler Modus bleibt erhalten. Jede externe Mutation hat klare Autorität, Audit und Reconciliation; der Agent kann ohne UI-Babysitting arbeiten.
 
@@ -933,10 +986,10 @@ Ein solcher Task ist wesentlich aussagekräftiger als eine synthetische Fehlerme
 | Risiko | Warum es real ist | Gegenmaßnahme |
 |---|---|---|
 | **Overengineering** | Komplexe Harnesses verschlechtern je nach Task/Modell Aufwand und Leistung [R04–R06] | Kleine Baseline, Ablationen, adaptive Eskalation |
-| **Blindes Fixen falscher Dateien** | Repo-Namen beweisen nicht ausgeführten Codepfad | SPARI Runtime Evidence Gate, Same-path-Retest |
-| **Falsch-positive Fertigmeldungen** | Worker-Text ist kein Funktionsnachweis | AppleMe Provenienz und unabhängige Evidence Gates |
+| **Blindes Fixen falscher Dateien** | Repo-Namen beweisen nicht ausgeführten Codepfad | Trace-first-Entscheidungslogik Runtime Evidence Gate, Same-path-Retest |
+| **Falsch-positive Fertigmeldungen** | Worker-Text ist kein Funktionsnachweis | Trajectory-Assurance-Logik Provenienz und unabhängige Evidence Gates |
 | **Endlos-Retry / Agenten-Stillstand** | Kein Progress trotz Tokens und Zeit | TrajectoryFSM, Probe, begrenztes Revival |
-| **Test-Overfitting** | Patch/Tests werden aufeinander zugeschnitten [R16, R30] | fixe Baseline, unabhängige Orakel und withheld tests |
+| **Test-Overfitting** | Patch/Tests werden aufeinander zugeschnitten [R16] | fixe Baseline, unabhängige Orakel und withheld tests |
 | **Kontext-Overload** | irrelevante Dateien/Logs verdrängen entscheidende Fakten | deterministische Elision, scoped retrieval |
 | **C-spezifische Memory-Safety-Bugs** | C-Kern kontrolliert kritische Zustände | kleiner Umfang, statische Analyse, Sanitizer, Fuzzing, harte Ownership-/Length-Prüfungen |
 | **Doppelte externe Aktionen** | Crash nach Dispatch vor Receipt | transaktionale Outbox, Effekt-FSM, Probing, Suspend |
@@ -951,8 +1004,8 @@ Ein solcher Task ist wesentlich aussagekräftiger als eine synthetische Fehlerme
 ### 15.1 Explizite Open Questions
 
 1. Welcher bestehende Coding-Worker liefert auf unserem VPS oder lokalen Host die zuverlässigste Session-/Tool-Ereignisstruktur mit dem kleinsten zusätzlichen Code?
-2. Welche AppleMe-Detektoren lassen sich vollständig deterministisch nach C übertragen, welche benötigen Host-/Log-Parser?
-3. Welche SPARI-Entscheidungsartefakte müssen als C-Datentypen existieren, welche können über ein typisiertes JSON-Schema verbleiben?
+2. Welche Trajectory-Assurance-Logik-Detektoren lassen sich vollständig deterministisch nach C übertragen, welche benötigen Host-/Log-Parser?
+3. Welche Trace-first-Entscheidungslogik-Entscheidungsartefakte müssen als C-Datentypen existieren, welche können über ein typisiertes JSON-Schema verbleiben?
 4. Welche Testframeworks unserer Ziel-Repositories besitzen einen stabilen, schnellen reproduzierbaren Eintrittspunkt?
 5. Welche Prozesse/Programme dürfen standardmäßig im isolierten Repair-Workspace laufen?
 6. Welches unabhängige Verifikationsverfahren ist pro Aufgabentyp ausreichend, ohne immer einen zweiten teuren Modellworker aufzurufen?
@@ -970,7 +1023,7 @@ Dies sind **gezielte empirische und Implementierungsfragen**, keine Gründe, die
 | ADR-001 | Produktname **KOTZE Agent** | beschlossen; „Harness“ bleibt interne Schicht |
 | ADR-002 | Schwerpunkt autonome Fehlerbehebung | beschlossen; allgemeine Entwicklung als anschließender Fähigkeitsausbau |
 | ADR-003 | **C11 für den deterministischen Kern** | beschlossen als Konzeptentwurf; C-Portabilität und Memory Safety ausdrücklich testen |
-| ADR-004 | **SPARI-/AppleMe-Mechanismen integriert und dupliziert** | beschlossen; eigenständiger Betrieb ohne deren Dienste |
+| ADR-004 | **Repair-/Assurance-Mechanismen integriert und dupliziert** | beschlossen; eigenständiger Betrieb ohne deren Dienste |
 | ADR-005 | **Mehrere persistente FSMs statt einer gigantischen Workflow-FSM** | beschlossen; Work, Diagnosis, Trajectory, Patch, Verification, Effect |
 | ADR-006 | **SQLite als lokaler State Store** | technische Empfehlung; durch C11-Spike zu bestätigen |
 | ADR-007 | **Coding-Modelle über austauschbare Adapter** | vorgeschlagen; native SDK/CLI-Kompatibilität prüfen |
@@ -984,16 +1037,16 @@ Dies sind **gezielte empirische und Implementierungsfragen**, keine Gründe, die
 
 ## 17. Konkreter Engineering-Auftrag für die Implementierung
 
-**Auftragsziel:** Einen eigenständig startbaren, in C11 implementierten KOTZE-Kernel entwickeln, der SPARI- und AppleMe-Mechanismen intern integriert, einen vorhandenen Coding-Worker kontrolliert und den vollständigen Repair-Prozess mit unabhängiger Evidenz und Crash-Recovery abschließt.
+**Auftragsziel:** Einen eigenständig startbaren, in C11 implementierten KOTZE-Kernel entwickeln, der Trace-first-Entscheidungslogik- und Trajectory-Assurance-Logik-Mechanismen intern integriert, einen vorhandenen Coding-Worker kontrolliert und den vollständigen Repair-Prozess mit unabhängiger Evidenz und Crash-Recovery abschließt.
 
 **Verbindliche Arbeitsreihenfolge:**
 
-1. Exakte Donor-Revisionen und die konkreten notwendigen Quellmodule von SPARI, AppleMe und Codex Session Controller lesen; keine generischen Nachbauten aufgrund einer README-Zusammenfassung.
+1. Exakte Donor-Revisionen und die konkreten notwendigen Quellmodule von Trace-first-Entscheidungslogik, Trajectory-Assurance-Logik und persistenter Coding-Session-Controller lesen; keine generischen Nachbauten aufgrund einer README-Zusammenfassung.
 2. Eine kleine *parity-first* Spezifikation aus vorhandenen Tests und Schemas ableiten.
 3. Das C11-Kernmodell mit den getrennten FSMs und den 12 Invarianten aus Abschnitt 6 implementieren.
 4. SQLite-Transaktionen, Budgetreservierung und externes Effekt-Reconciliation zuerst deterministisch absichern.
 5. Einen realen Coding-Worker über eine minimal-invasive CLI-/SDK-Schnittstelle integrieren.
-6. SPARIs Runtime Evidence Gate und AppleMes Trajectory-/Recovery-Mechanismen in die KOTZE-Codebasis aufnehmen; keine laufenden Donor-Dienste voraussetzen.
+6. des Trace-first-Ansatzes Runtime Evidence Gate und Trajectory-Assurance-Logiks Trajectory-/Recovery-Mechanismen in die KOTZE-Codebasis aufnehmen; keine laufenden Donor-Dienste voraussetzen.
 7. Einen **realen reproduzierbaren Fehler** auf bekanntem Commit autonom beheben und mit separatem, unveränderlichem Verifikationsvertrag nachprüfen.
 8. Danach gezielte Performance-/Kostenoptimierungen ablatieren; keine unbewiesene Agentenarchitektur zusätzlich einführen.
 
@@ -1004,7 +1057,7 @@ Dies sind **gezielte empirische und Implementierungsfragen**, keine Gründe, die
 - Kein pauschaler Zugriff auf Produktionsverzeichnisse, Credentials oder Datenbanken.
 - Kein automatischer Start kostenpflichtiger CI-Läufe.
 - Kein Ausweiten von Scope wegen bloß interessanter Altdateien.
-- Keine zweite komplette SPARI-/AppleMe-Serverlandschaft als Pflichtabhängigkeit.
+- Keine zweite komplette Repair-/Assurance-Serverlandschaft als Pflichtabhängigkeit.
 - Keine Behauptung von Produktionsreife aus isolierten Unit-Tests.
 
 **Erstes fertiges Artefakt nach dem Konzept:** ein Architektur-/Donor-Paritätsbericht mit genauem Dateibezug, Zustandskontrakten, Testplan und einer eigenständig ausführbaren C11-Kernfunktion – nicht ein kosmetisches Dashboard oder eine neue Prompt-Sammlung.
@@ -1013,8 +1066,289 @@ Dies sind **gezielte empirische und Implementierungsfragen**, keine Gründe, die
 
 ## 18. Schlussfolgerung
 
-KOTZE Agent ist **kein Harness mit Bugfix-Plugin**, sondern ein **vollständiger autonomer Coding-Agent mit eigenem, kleinen C11-Execution- und Assurance-Kern**. Die bereits vorhandenen SPARI- und AppleMe-Funktionen werden bewusst in das neue Produkt integriert. Es soll dadurch einen eindeutigen technischen Mittelpunkt besitzen und auch unabhängig von einer laufenden FruitStack-Installation funktionieren.
+KOTZE Agent ist **kein Harness mit Bugfix-Plugin**, sondern ein **vollständiger autonomer Coding-Agent mit eigenem, kleinen C11-Execution- und Assurance-Kern**. Die bereits vorhandenen Trace-first-Entscheidungslogik- und Trajectory-Assurance-Logik-Funktionen werden bewusst in das neue Produkt integriert. Es soll dadurch einen eindeutigen technischen Mittelpunkt besitzen und auch unabhängig von einer laufenden vorhandener Agenten-Stack-Installation funktionieren.
 
-Die wissenschaftlichen Arbeiten sprechen für drei Prioritäten: **eine einfache, leistungsfähige Ausführungsschleife**, **runtime- und evidenzgestützte Fehlerbehebung** und **einen sparsamen, nur bei Bedarf eskalierenden Kontrollmechanismus**. Google Harness², RRSI und AHE sind wertvolle zweite Entwicklungsstufe, wenn die erste autonom und nachweisbar repariert.
+Trace-guided Fault Localization und kontrollierte Mehrhypothesenprüfung werden als zusätzliche, bedarfsgesteuerte Verfahren in Abschnitt 20 spezifiziert. Die kontinuierliche Fehlerprävention mit einer gemeinsamen Ursachen-Map ist in Abschnitt 21 definiert. Die wissenschaftlichen Arbeiten sprechen für drei Prioritäten: **eine einfache, leistungsfähige Ausführungsschleife**, **runtime- und evidenzgestützte Fehlerbehebung** und **einen sparsamen, nur bei Bedarf eskalierenden Kontrollmechanismus**. Google Harness², RRSI und AHE sind wertvolle zweite Entwicklungsstufe, wenn die erste autonom und nachweisbar repariert.
 
 **Definition von Erfolg:** KOTZE findet nicht nur überzeugend aussehende Patches, sondern stellt **belegbar funktionierende Software** wieder her – zuverlässig über mehrere Sessions hinweg, ohne Endlosschleifen, ohne unkontrollierte Doppelaktionen und mit nachvollziehbaren Kosten.
+
+
+
+---
+
+## 19. Implementierungskontrakte für Phase 0/1
+
+### 19.1 Formales Reproducer-/Oracle-Schema
+
+Vor der ersten Codeänderung muss ein Prüforakel eingefroren sein. Es ist ein unabhängiges, hashgebundenes Eingabeartefakt – **kein vom Coder nachträglich editierter Test**. Ein technisches Minimalformat ist:
+
+~~~json
+{
+  "schema_version": "KOTZE-ORACLE/1",
+  "reproducer_id": "case-001/repro-1",
+  "work_id": "case-001",
+  "repository_url": "https://github.com/example/buggy-repo",
+  "base_sha": "<40-hex-commit-sha>",
+  "entrypoint": {"argv": ["python", "-m", "pytest", "-q", "tests/test_failure.py::test_case"], "cwd": ".", "env_allowlist": ["PATH", "PYTHONPATH"], "timeout_ms": 30000},
+  "oracle": {"kind": "exit_code", "bug_present_when": "nonzero", "bug_absent_when": "zero", "assertion_id": "test_case", "stdout_match": null},
+  "repeat": {"n": 3, "k": 3},
+  "immutable_inputs": [{"path": "tests/test_failure.py", "sha256": "<sha256>"}],
+  "runtime_fingerprint": "<sha256-of-runtime-manifest>",
+  "frozen_at": "<UTC timestamp>",
+  "oracle_hash": "<sha256-of-canonical-oracle-json>"
+}
+~~~
+
+Das JSON ist ein **Schema-Beispiel**, kein bereits festgelegter realer Akzeptanzfall: Platzhalter dürfen nicht als tatsächliche SHA-Werte interpretiert werden. `argv` ist ein Array von Argumenten, nicht eine vom Modell erzeugte unkontrollierte Shell-Kommandozeile. Die Kombination aus `base_sha`, Test-Hashes, Runtime-Fingerprint und kanonisch serialisiertem Oracle bestimmt die Identität. Die eigentliche Testdatei und vollständigen Fixtures liegen außerhalb des Schreibbereichs des Coders.
+
+**Entscheidungstabelle:** Auf der unveränderten Baseline muss das definierte Fehlersignal in mindestens `k` von `n` Wiederholungen auftreten; auf dem Kandidaten muss das Gegenereignis mindestens `k` von `n` Mal bestätigt werden. `n` und `k` werden **vor** dem Patch festgelegt. Für den ersten deterministischen MVP ist `k=n`; bei inkonsistenten Wiederholungen wird `INCONCLUSIVE` vergeben, bis ein gesonderter Flakiness-Vertrag definiert ist. Kein ausbleibender Crash ohne getestete ursprüngliche Strecke zählt als Reparatur.
+
+**Unabhängiger Verifier:** (1) Frischen Checkout bei exakt `candidate_sha` erzeugen; (2) im unveränderlichen Prüfbereich originalen Reproducer/Testdaten aus dem Oracle-Bundle einspielen; (3) deren Hashes gegen den eingefrorenen Manifest-Hash prüfen; (4) identische Ausführungsparameter gegen Base und Candidate verwenden; (5) Wiederholungsresultate inklusive stdout/stderr/exit/timeout und Commit-SHA dauerhaft sichern; (6) Regressionen gegen definierte Gate-Liste prüfen; (7) nur dann PASS. Ein vom Coder veränderter Test bewirkt `ORACLE_TAMPERED` und sperrt PASS.
+
+### 19.2 Klassifikation der übernommenen Engineering-Methoden
+
+Die Regeln sind nach ihrer **tatsächlichen Ausführbarkeit** klassifiziert. Eine natürliche Sprachregel wird nicht allein durch die Implementierung in C zu einer maschinell erkennbaren Wahrheit.
+
+| Methode / Einzelregel | Klasse | Konkrete Umsetzung oder Grenze |
+|---|---|---|
+| Baseline-SHA, Oracle-Hash und Retest-Hash stimmen überein | **A: deterministisch** | Exakte SHA-/Hash-Vergleiche, C-Gate |
+| Veränderte Dateien liegen im erlaubten Scope | **A** | Diff- und Pfadprüfung, explizite Symlink- und TOCTOU-Sicherung |
+| Ausführung entspricht dem beobachteten Einstiegspunkt | **A/B** | A: identische argv/cwd/Fixture-Hashes; B: fachliche Gleichwertigkeit einer abweichenden Eintrittsstrecke |
+| Kein wiederholter Patch aus identischem widerlegtem Ansatz ohne neue Evidenz | **A** | Hypothesen-Fingerprint und Evidence-Version vergleichen |
+| Erste ursächliche Fehlbedingung des Systems gefunden | **B: Modellurteil plus Pflichtartefakt** | Kausale Hypothese, Vorhersage, isolierende Gegenprobe; C kann Belege fordern, aber Kausalität nicht frei entscheiden |
+| Minimaler architekturkonformer Patch | **B mit A-Schranken** | B: Semantik/Architektur; A: Diff-Scope, Dateianzahl, verbotene Schnittstellen, Tests |
+| Künftige Relevanz eines Suchergebnisses abschließend beweisen | **C: nicht allgemein portierbar** | Kein universelles deterministisches Wahrheits-Gate; Suchheuristik empirisch messen |
+| Laufender Agent wiederholt exakt dieselben Tools/Fehlersignaturen | **A** | Rolling-Fingerprints, gezählte neuartige Beobachtungen |
+| Agent führt planloses A→B→A→B aus | **A** | Persistente Phasenhistorie, Parametrisierung und negative Kontrollen |
+| Agent macht *inhaltlich* keinen Fortschritt trotz unterschiedlichen Outputs | **B** | Neue Evidenz/prüfbare Artefakte als Basis, semantische Einschätzung bei Bedarf |
+| Abschluss bei fehlendem externen Prüfbeleg verbieten | **A** | `WORKER_CLAIMED < HOST_OBSERVED < INDEPENDENTLY_VERIFIED` als Berechtigungs-/Provenienz-Gate |
+| Automatisch sicherstellen, dass beliebiger Code fachlich korrekt ist | **C** | Ohne spezifiziertes Oracle/formales Modell unmöglich; `INCONCLUSIVE` statt erfundenem PASS |
+
+**Regel für Portierung:** Klasse A in kleine, deterministische C-Funktionen; B als typisierte Modellentscheidung mit Belegpflicht und kontrollierter Ausführung; C nicht behaupten oder als Gate nachbauen. Jeder übernommenen Klasse-A/B-Regel wird ein positiver, negativer und ein adversarieller Regressionstest zugewiesen.
+
+### 19.3 Auswahl der Verfahren – warum und wann
+
+| Methode | Welches konkrete Problem? | Minimaler Algorithmus/Eingang | Aktivieren bei | Grenzen / Falsifikation |
+|---|---|---|---|---|
+| **Minimaler command-based Worker (mini-SWE-agent-Prinzip)** [R14] | Black-Box-Werkzeuge entziehen sich der tatsächlichen Beobachtung | Modell gibt einzelne typisierte Aktion; Host führt sie aus und führt Receipt | **Standard in Phase 1** | Besteht Sandbox- und Kostenvergleich mit Black-Box-Worker nicht, separat evaluieren |
+| **Trace-first Fehlerlokalisierung** [R27] | Reparatur an falschen Dateien und spekulatives Audit | Reproducer → effektiver Entry-Point → Laufzeitpfad → erste konkrete Abweichung | **Jeder tatsächlich beobachtete Fehler** | Ursache benötigt interpretierte Gegenprobe, nicht nur Stacktrace |
+| **SBFL/Ochiai** [R27] | Viele mögliche Fehlerstellen trotz reproduzierbarer Tests | `ef/sqrt(F*(ef+ep))` mit `ef`=fehlgeschlagene Tests, die Zeile ausführen; `ep`=bestandene Tests, die sie ausführen; `F`=alle fehlgeschlagenen Tests | Coverage-Daten und mehrere trennende Tests vorhanden | **Verdachtsranking, keine Fehlerwahrscheinlichkeit**; bei fehlender Coverage auslassen |
+| **Bayesianische Hypothesenaktualisierung** [R32] | Neue Evidenz soll konkurrierende Ursachen konsistent umsortieren | Prior und kalibrierte Likelihoods aus historischen Daten; Posterior proportional Prior × Likelihood | Erst bei belegter Kalibrierung/vergleichbaren Fehlerklassen | Kein willkürliches `0,94` als posterior; zunächst nur Hypothesenstatus + Ranking |
+| **Falsifizierbare Hypothese** [R27] | Wiederholung gleicher fehlerhafter Lösungsansätze | Hypothese, erwartete Beobachtung, Falsifier, Experiment, Ergebnis | **Vor jedem nichttrivialen Patch** | Modellurteil bleibt fehlbar; Evidence-Gate zwingend |
+| **Kompaktes Error-Trajectory-Memory** [R11] | Kontextverlust, Wiederholung widerlegter Patches | Episode mit Hypothesen, Fehlersignatur, Patch-SHA, Testreceipt | Nach jedem widerlegten Versuch | Nicht jede Episode in Modellkontext laden; nach Relevanz begrenzen |
+| **Adaptive Branch Search (ReMCTS)** [R33] | Lineares Patchen bleibt in falschem Algorithmus gefangen | Kandidatenbaum mit Parent-SHA, branchlokaler Diagnose, externer Ausführungsbewertung | Nach wiederholt falsifizierten Hypothesen und nur mit frei verfügbarem Budget | Nicht jede Aufgabe benötigt MCTS; Studien hauptsächlich Funktionsgenerierung, nicht große Repos |
+| **Isoliertes Editing und Viewer/Editor-Übergabe** [R10] | Suchausgaben verschmutzen den Schreibkontext | Reader gibt präzisen symbol-/zeilenbasierten Ausschnitt; Writer erhält Patchziel + Basis-Hash | Wenn größerer Kontextbedarf nachgewiesen | Der Studiengewinn betrifft auch ein trainiertes Editor-Modell; Adapter allein reproduziert ihn nicht |
+| **Gezielte Regressionstest-Auswahl** [R09] | Vollsuite kostet Zeit und vergrößert LLM-Rauschen | Coverage-/Abhängigkeitsbezug zum Patch; erst relevante Teilmenge | Nach erstem korrektem Reproducer und bei teurer Vollsuite | Teilmengentest ersetzt abschließendes Regression-Gate nicht |
+| **Property-Based Testing** [R34] | Beispieltests übersehen Randfälle | Invarianten → generierte Inputs → Shrinking eines Gegenbeispiels | Geeignete reine Funktionen / klar definierte Contracts | Property kann selbst falsch sein; nicht autonom auf Aussage des Coders vertrauen |
+| **Mutation Testing** [R35] | Tests laufen, entdecken aber Fehler nicht | Gezielte Mutationen im isolierten Check; abgetötete/überlebende Mutanten getrennt | Kritische Berechnung, verdächtig triviale Testorakel | Keine pauschale 85%-Grenze; äquivalente Mutanten und Kosten beachten |
+| **Independent Fresh-Context Verification** [R20] | Selbstbestätigung der Agenten | Prüfer ohne Schreibrechte führt Original-Oracle an Fresh Checkout aus | **Jeder Abschluss** | LLM-Kritiker nur Ergänzung; PASS durch Host-Evidenz, nicht Modelltext |
+| **Trajectory-Assurance** [R36] | Endlosschleifen, Scheinfortschritt, verfrühtes DONE | Observation-Hashes, Phasen- und Error-Signatur, Probe, bounded Revival | Für jeden langlaufenden Worker | Negativkontrollen: langsam aber produktiv, intermittierend aber konvergent |
+| **Regularisierte Harness-Selbstoptimierung** [R01–R03] | Nicht übertragbare Prompt-/Tool-Verbesserungen | Einzelne editierbare Profile, Hypothese vor Änderung, Held-out-Prüfung | Erst nach nachgewiesenem E2E-Repair | Kein Selbstpatching geschützter Trust-/Verification-Gates |
+
+**Die einleitende Rangfolge ist keine harte Stufenpflicht:** deterministische und kostengünstige Mechanismen sind der Standard, teurere Verfahren werden nur aktiviert, wenn sie nachweislich eine offene Entscheidung beeinflussen. Wo die Quelle bloß ein Forschungsprototyp ist, wird die Übernahme als Hypothese behandelt und in A/B-Tests abgesichert.
+
+### 19.4 Akzeptanzfall, Statistik und externe Evaluatoren
+
+Der erste Fall muss aus einer **realen, fixierten Python/pytest-Aufgabe** gewählt werden, für die Repository-URL, Commit-SHA, unveränderlicher Reproducer und klarer Scope tatsächlich vorliegen. Diese Identität ist **noch nicht festgelegt**; eine erfundene Fall-ID oder ein beispielhafter Commit gilt nicht als Auswahl. Vor realen Runs wird das Fallmanifest vorregistriert. Es müssen mindestens zwei plausible Hypothesen unterscheidbar sein.
+
+Die **erste kausale Ablation** ist die Minimal-Baseline A0 gegen A1 (mit trace-first Diagnosegate). Weitere Kontrollarme werden erst nach dieser Prüfung zugelassen. Zur Orientierung: Ein gepaarter McNemar-Test erfordert namentlich festgelegte diskordante Erfolgs-/Misserfolgspaare; Fallzahl hängt von erwarteter Verbesserung und Discordance ab. Die früher genannten ungefähren 115 bzw. 470 Aufgaben sind **keine bereits validierte Powerrechnung** und werden nicht als Versuchsplan übernommen. Vor dem Experiment: α, Power, gewünschte Effektgröße, erwartete diskordante Paare, Mehrfachteststrategie und Budget festlegen; danach per Skript nachrechnen. `TRAIN` und `HELD_OUT` strikt trennen. Externe Benchmark-Runner dürfen Docker benötigen; **das erzeugt keine Docker-Abhängigkeit des KOTZE-Produktkerns**.
+
+Evaluationsreihenfolge: (1) deterministische FSM-/Crash-/Oracle-Parität; (2) exakte lokale A0/A1-Vergleiche auf fixierten Aufgaben; (3) 2×2-Interaktion A0–A3; (4) ergänzende Tests auf langlaufender Entwicklung; (5) optionale Selbstoptimierung auf separatem Held-out-Korpus. Keine ungefragten kostenpflichtigen CI-Runs.
+
+### 19.5 C11-Abhängigkeiten und Sicherheitsannahmen
+
+| Baustein | Vorzugsweise | Grund / Grenze |
+|---|---|---|
+| ACID-State | SQLite C-API, WAL | Kernzustände und Outbox transaktional; `synchronous`-Policy dokumentieren [R24] |
+| JSONL/IPC | **yyjson** (MIT) oder cJSON (MIT) | Kleine C-Parser mit Bounds/Fehlercodes; Input-Schema versioniert [R37] |
+| Hash-Bindung | etablierte SHA-256-Implementierung oder Git-Hash für Git-Objekte | **Git-Objekthash ist nicht identisch mit SHA-256 beliebiger JSON-Bundles**; zwei Algorithmen sauber kennzeichnen |
+| Git | Git CLI zuerst; libgit2 optional | Wenig neuer Code; Worktrees, rev-parse und diff mit Exit-Codes [R25] |
+| Optionaler Parser | Tree-sitter | Nur bei nachgewiesener Retrieval-Verbesserung [R26] |
+| OS-Isolation | bubblewrap + restriktive Linux-Namespace-/seccomp-/Landlock-Policy | Externes, überprüftes Runtime-Profil; keine Sicherheitsgarantie allein durch Aufruf von bubblewrap [R38] |
+| Policy-Effekte | C11 State Reducer / SQLite Outbox | Keine neuen monolithischen Workflow-Frameworks |
+
+Für den MVP gehört *keine* neue Vektordatenbank, kein Redis, kein obligatorischer Docker-Daemon und kein großflächiger Codeindex zum Kern. Erst ein konkreter fehlender Capability-Nachweis rechtfertigt zusätzliche Infrastruktur.
+
+## 20. Trace-guided Repair: Methodenübernahme und Sicherheitskontrakte
+
+**Forschungsanker:** J. Wu et al., *From Guessing to Seeing: Enhancing LLM-Based Program Repair via Trace-Guided Multi-strategy Debate*, ASE 2026, arXiv:2604.02647v2, DOI:10.1145/3832783.3837458 [R40]. Ergänzend: Bouzenia et al., *TraceFixer* [R41], Haque et al., *Towards Effectively Leveraging Execution Traces for Program Repair with Code LLMs* [R42], sowie Huang et al., *TraceCoder* [R43].
+
+### 20.1 Was die Studien tatsächlich belegen
+
+TraceRepair nutzt einen autonom arbeitenden Probe-Schritt, der kritische Laufzeitwerte erfasst, und vergleicht anschließend drei Reparaturperspektiven (Defensive, Causal, Semantic) in einem evidenzgebundenen Kritikprozess. Auf Defects4J v1.2 und v2.0 meldet die DeepSeek-V3.2-Konfiguration 392 **als korrekt klassifizierte** Reparaturen (217 + 175), gegenüber 452 testbestehenden Kandidaten (Tabelle 3). „Korrekt“ bezeichnet dabei die im Paper angewandte Prüfung; die Zahl ist **kein formaler Korrektheitsbeweis und keine unabhängige Produktionsmessung**. Eine REINFIX-Konfiguration mit GPT-4o erreicht dort 291; wegen verschiedener Backbone-Modelle und unterschiedlicher Aufrufbudgets ist die Differenz **kein isolierter Harness-Effekt**. Mit GPT-3.5 erreicht REINFIX **241**, TraceRepair **224**; das darf nicht verschwiegen werden [R40, Tabelle 3, Abschnitt 5.1].
+
+In der 2×2-artigen Ablation auf **Defects4J v1.2 Single-Function** mit DeepSeek-V3.2 entstehen 102 korrekte Reparaturen ohne Zusatzverfahren, 154 mit Debate ohne Trace, 158 mit Trace ohne Debate und 177 mit beiden. Dies trennt zwei Wirkungsrichtungen, **nicht** den Nutzen der Probe-Implementation allein. Beim Wegfall der Defensive-Strategie verbleiben 166, ohne Semantic 169 und ohne Causal 171 (Tabelle 6). Diese Werte sind Teilmengenwerte; keinesfalls als Beiträge zur Gesamtmenge 392 addieren [R40, Tabelle 6].
+
+Die kumulative Entwicklung über den vollständigen untersuchten Satz lautet **326 direkte Reparaturen → 359 nach Runde 1 → 380 nach Runde 2 → 388 nach Runde 3 → 392 nach abschließender Arbitration**. Zusätzlicher Erfolg sinkt pro Runde (+33 / +21 / +8 / +4); die *marginalen Kosten jeder Runde* sind im Paper nicht als gleichwertiger vollständig kontrollierter Vergleich angegeben. Folglich wird weder „immer drei Runden“ noch „genau zwei Runden ist optimal“ behauptet [R40, Abbildung 4].
+
+Die modellabhängige Probe-Erfolgsquote beträgt unter Perfect Fault Localization **631/673 (93,8 %)** bei DeepSeek-V3.2 bzw. **534/673 (79,3 %)** bei GPT-3.5 (Tabelle 7). Eine erfolgreiche Instrumentierung ist noch **kein Beweis, dass das instrumentierte Verhalten unverändert blieb**. TraceRepair berichtet unter Method-Level Fault Localization für die betrachtete Teilmenge 171 statt 177 korrekte Reparaturen (Tabelle 5); das ist nicht gleichbedeutend mit autonomer End-to-End-Lokalisierung verteilter Fehler [R40, Tabellen 5 und 7].
+
+Die Autoren berichten für DeepSeek-V3.2 durchschnittlich **77.000 Tokens pro Bug**, davon **91,1 %** für Reparaturagenten (Tabellen 9 und 10); Testläufe, Modellpreise und Vergleichsbedingungen müssen zusätzlich berücksichtigt werden. Die Studie zum Trace-Prompting von Haque et al. beobachtet Vorteile gegenüber tracefreien Baselines nur in **2 von 6** Datensatz-/Modellkombinationen: Rohtraces sind für sich allein **keine zuverlässig wirksame Verbesserung** [R40, Tabellen 9–10; R42, Abstract].
+
+### 20.2 Übernommene Methoden: Entscheidung und Grenzen
+
+| Mechanismus | Warum er übernommen wird | Implementierung im KOTZE Agent | Was bewusst **nicht** übernommen wird |
+|---|---|---|---|
+| **Targeted runtime snapshot** | Stille Logikfehler liefern häufig nur falsche Ausgabewerte; Zwischenschritte fehlen. | Kleinstmögliche Probe auf dem nachgewiesenen Pfad: typisierte Variablen-, Branch- und Return-Snapshots; begrenzte Ereignis-/Bytezahl; Hash und Provenienz je Probe. | Pauschale Instrumentierung kompletter Repositories und unbeschränktes Trace-Dumping. |
+| **Trace-as-constraint** | Kandidaten müssen sich an konkreten Beobachtungen messen lassen statt plausible Geschichten zu erzählen. | Hypothese referenziert beobachtete Baseline-Fakten, macht eine falsifizierbare Vorhersage und benennt die erwartete Änderung beim identischen Reproducer. | Rohtrace als angebliche mathematische Korrektheitsgarantie. |
+| **Drei Reparaturperspektiven** | Defensive, kausale und semantische Reparaturen finden unterschiedliche Fehlerklassen (Tabelle 6). | Auf Anforderung drei **unabhängige Hypothesenprofile**, nicht zwingend drei gleichzeitig laufende Modelle. Ergebnisse werden auf identischer Evidenzbasis verglichen. | Dauerhaftes Drei-Agenten-Team für jeden trivialen Fehler. |
+| **Evidence-constrained critique** | Debatte verbessert im untersuchten Teilset die Reparaturquote; widerlegte Hypothesen dürfen nicht zurückkehren. | Jede Kritik muss ein konkretes Evidence-ID, eine Gegenprobe oder eine Vertragsverletzung referenzieren; widerspruchsfreie Rhetorik genügt nicht. | Mehrheitsentscheidung oder Modell-Judge als Endabnahme. |
+| **Branch-local lesson memory** | Verhindert wiederholte Fehlversuche und Erklärungsverlust bei Neustarts. | Pro Hypothesenast: Ausgangs-SHA, Patch-ID, Falsifier, Probe/Testergebnis, begrenztes Lessons-Feld, neue Evidenzversion. | Unkontrolliertes Mitspeichern privater Gedankengänge oder riesiger Transkripte. |
+| **Rollback and bounded search** | Patch-Schleifen bleiben gelegentlich auf einem falschen Lösungsast stecken. | Jeder Ast erhält einen isolierten Ausgangszustand. Revert nur im **eigenen Worktree**; Vergleich nach unverändertem Oracle, Regressionen, Scope und Kosten. | `git reset --hard` auf fremden Arbeitskopien oder die Annahme „mehr grüne Tests“ = bessere Lösung. |
+| **Independent patch acceptance** | In TraceRepair bleibt Testüberanpassung ein offenes Problem. | Separater, schreibgeschützter Verifier auf frischem Checkout, eingefrorene Oracle-/Fixture-Hashes und Same-path-Retest, Regression, reproduzierbare Receipts. | Erfolgsannahme durch Judge-Text oder veränderte Worker-Tests. |
+
+**Wichtige Semantik:** Ein aufgezeichneter Zustand auf der fehlerhaften Baseline darf **nicht** als immer wahrer Sollzustand für den reparierten Code festgesetzt werden. Beispiel: `skip()==0` und anschließender Abbruch sind *Baseline-Beobachtungen*. Ein guter Patch muss diesen fehlerhaften Verlauf gerade ändern dürfen. Die harte Bindung betrifft die **Authentizität der Beobachtung, die identischen Eingaben und das festgelegte Akzeptanz-Orakel**, nicht unveränderliche interne Variablenwerte über Bug und Fix hinweg. Jede Hypothese beschreibt die erwartete kausale Abweichung.
+
+### 20.3 Probe-Vertrag und Instrumentierungs-Fehlerzustände
+
+Ein `TraceProbe` besitzt mindestens:
+
+| Feld | Pflichtinhalt |
+|---|---|
+| `probe_id, work_id, hypothesis_id` | stabile Identität und Ursache |
+| `base_sha, executable_hash, oracle_hash` | Bindung an identischen Ausgangscode und Reproducer |
+| `entrypoint_id, process_identity, thread_id` | eindeutige Laufzeit-/Thread-Herkunft soweit tatsächlich beobachtbar |
+| `location, probe_kind, expected_signal` | begrenzte Beobachtungsstelle und erwartetes Signal |
+| `max_events, max_bytes, deadline_ms` | harte Grenzen vor Instrumentierung |
+| `instrumented_sha, instrumentation_diff_hash` | exakte, vom Original getrennte Probe-Variante |
+| `runtime_fingerprint, collector_version` | Umgebung und Collector-Identität |
+| `evidence_ids, status, receipt_hash` | Ergebnis + Herkunft |
+
+Probe-Zustände: `PROPOSED → AUTHORIZED → INSTRUMENTING → CAPTURING → CAPTURED` oder `COMPILATION_FAILED / EXECUTION_FAILED / BEHAVIOR_CHANGED / INCOMPLETE / TIMED_OUT / DENIED`. Für `BEHAVIOR_CHANGED` werden Reproducer-Ausgabe, Failure-Signatur, Laufzeit und ggf. Timingstreuung auf der **uninstrumentierten** und instrumentierten Baseline verglichen. Eine identische Fehlermeldung allein beweist keine störungsfreie Instrumentierung; bei Timing- und Race-Bugs wird ein Trace als `LOW_CONFIDENCE` oder `INCONCLUSIVE` behandelt.
+
+Alle Instrumentierungsänderungen sind temporär, getrennt vom eigentlichen Patch, rücksetzbar und dürfen niemals über den Reparaturzweig in das Produkt-Commit gelangen. Wenn eine Probe nicht gelingt, **keine erfundene Laufzeitbeobachtung**: dokumentierter Fall-back zu bereits vorhandenen Logs, Coverage oder gezielter erneuter Diagnose; kein automatisches `VERIFIED`.
+
+### 20.4 Integration in die Ursachen-Map
+
+Jedes Runtime-Ereignis darf mehrere Hypothesen stützen oder widerlegen. Graphknoten: `SYMPTOM, CAUSE_CANDIDATE, INTERMEDIATE_CONDITION, CONTRACT, PROBE, PATCH`. Kanten: `MAY_CAUSE, EXPLAINS, CONTRADICTS, TESTED_BY, ADDRESSED_BY, DEPENDS_ON`. Die Fischgrätenansicht organisiert *mögliche Ursachen*, der Warum-Baum zeigt deren Begründung, die Evidenzansicht stellt die tatsächlich beobachteten Pfade und Querverbindungen dar.
+
+Ein **Verdachtswert** aus Ochiai/SBFL ist nur ein statistisches Ranking über Coverage/Testausgänge, keine Wahrscheinlichkeit `P(Ursache)`. Auch eine plausibel erscheinende Kausalgeschichte bleibt `HYPOTHESIS_OPEN`, bis eine Gegenprobe und eine belastbare Beobachtung die Diagnose stützen. Wenn mehrere Ursachen beteiligt sein können, wird **kein künstlicher eindeutiger Wurzelknoten** erzwungen.
+
+### 20.5 Cross-Service-Fehler und Sprachtransfer
+
+**Faktische Forschungslücke:** TraceRepair/TraceFixer belegen keine allgemeinen, vollautonomen Reparaturen über Java-, Python-, JS-, Datenbank-, Queue- und Browser-Grenzen hinweg. Daher arbeitet KOTZE mit einem einheitlichen Trace-Envelope und separat geprüften Sprachadaptern. Korrelationsfelder: `trace_id, span_id, parent_span_id, work_id, repository_sha, service_id, process_id, thread_id, timestamp, event_kind, payload_hash, source_provenance`. Eine vom Agenten erzeugte Text-Behauptung über eine externe Serviceantwort erhält niemals denselben Beweisgrad wie eine hostseitig beobachtete API-Antwort.
+
+Über Prozessgrenzen hinweg ist Kausalordnung nicht aus Wanduhren allein ableitbar. Kanten werden aus tatsächlich erfassten Request-/Message-IDs und `parent_span_id` rekonstruiert; fehlende Korrelationsdaten bleiben als `UNKNOWN_EDGE` sichtbar. Redis-/Datenbank-/Queue-Operationen können externe Effekte sein und dürfen bei UNKNOWN nicht blind wiederholt werden.
+
+**MVP-Scope bleibt ein eindeutig festgelegter Python/pytest-Fehler.** Java/Defects4J (insbesondere Compress-26) ist ein zusätzlicher wissenschaftlicher Referenzfall, nicht automatisch der erste Implementierungsfall. Multi-Process- und polyglotte Unterstützung wird nur mit eigenen Adapter-Akzeptanztests als abgeschlossen bezeichnet.
+
+### 20.6 Begrenzte Debatte und Budgetökonomie
+
+Die Entscheidung für mehrere Perspektiven erfolgt nur, wenn (a) der Originalfehler reproduziert ist, (b) mindestens zwei unterscheidbare Hypothesen offen sind oder ein erster Versuch falsifiziert wurde, (c) zusätzliche Evidenz eine relevante Entscheidung ändern kann und (d) die **reservierte** Restkapazität ausreicht. Der Default bleibt ein einzelner Coding-Worker. Als anfängliche **experimentelle** Grenze sind bis zu zwei Debattenrunden möglich; diese Zahl ist keine bewiesene optimale Rundenzahl.
+
+`ADMIT_DEBATE` reserviert Parent-Budget für alle Teilaufrufe atomar. Teure Debatten mit ausbleibendem Informationsgewinn, unverändertem Failure-Signal oder sinkendem erwarteten Nettoertrag werden beendet. `JUDGE_SUGGESTED` darf lediglich einen Kandidaten vorschlagen. Der finale Verifikationsautomat sieht ausschließlich Kandidaten-SHA, eingefrorenes Oracle und externe Testergebnisse.
+
+**Empirische Vergleichsarme nach der minimalen Baseline:** `T0` kein Probe/kein Debate; `T1` Probe ohne Debate; `T2` Debate ohne Probe; `T3` beide; `T4` adaptive Auslösung nur bei diagnostizierter Mehrdeutigkeit. Gleiche Modellklasse, Reproducer, Zeit-/Tokenbudget, Instrumentierungsprofil und unabhängig festgelegte Prüfer. Primärmetrik: vollständig verifizierte Fixes pro festem Gesamtbudget, nicht bloß `plausible patches`.
+
+### 20.7 Konkrete Nicht-Akzeptanzfälle
+
+- Der Patch ändert die Originaltests, Fixtures oder Oracle-Definition nach dem Freeze: `ORACLE_TAMPERED`, kein PASS.
+- Die Probe kompiliert nicht oder verändert die beobachtete Fehlerklasse: `INCOMPLETE` bzw. `BEHAVIOR_CHANGED`, kein erfundener Trace.
+- Nur ein kritisierendes Modell stimmt zu, aber Same-path-Retest fehlt: `INCONCLUSIVE`.
+- Eine zweite Reparaturhypothese widerspricht dem beobachteten Laufzeitpfad und besitzt keine neue Gegenbeobachtung: `HYPOTHESIS_REFUTED`.
+- Ein Worker verliert den Kontakt nach Git-Push/PR-Dispatch: `EFFECT_UNKNOWN`, erst Remote-Reconciliation.
+- Eine Fehlerursache betrifft zwei Services, aber es fehlt eine gesicherte Korrelation: `UNKNOWN_EDGE`, keine künstlich geschlossene Kausalkette.
+- Der Probe-/Debate-Aufwand erschöpft das Budget: `BLOCKED_BUDGET`; Artefakte bleiben für späteres Resume erhalten.
+
+**Definition of Done der Methodenübernahme:** Die oben definierten Verträge sind in C-Tabellen/Policies sowie Sprachadaptern abgebildet. Eine reproduzierbare Trace-vs-no-Trace-Ablation und ein Negative-Control-Test für störende Instrumentierung liegen vor. **Es wird kein Benchmarkgewinn von TraceRepair als KOTZE-Ergebnis ausgegeben.**
+
+---
+
+## 21. CI Agent: systematische kontinuierliche Verbesserung
+
+**Begriffsgrenze:** `CI Agent` steht hier für **Continuous Improvement Agent**, nicht für den obligatorischen Einsatz von GitHub Actions oder einer kostenpflichtigen Continuous-Integration-Pipeline. Er ist eine spezialisierte, bedarfsgesteuerte Funktion von KOTZE und kein verpflichtender zweiter LLM-Dienst.
+
+### 21.1 Warum nach dem Bugfix noch Arbeit bleibt
+
+Der Repair-Prozess beantwortet: *Wie stellen wir diese Funktion wieder her?* Der Continuous-Improvement-Prozess beantwortet: *Warum konnte diese Fehlerklasse entstehen, warum blieb sie unentdeckt und welche günstige Kontrolle verhindert eine Wiederholung?*
+
+Dazu werden bewährte Qualitätsmethoden übernommen, aber technisch überprüfbar operationalisiert:
+
+| Methode | Konkretes Softwareproblem | Mechanismus / Artefakt | Grenzen |
+|---|---|---|---|
+| **Ishikawa/Fishbone** | Frühe Fixierung auf eine einzige Fehlerursache | Kategorien und aufklappbare Hypothesen im gleichen Ursachen-Graph | Brainstorming-Map ist kein Kausalbeweis [R44] |
+| **5 Whys** | Symptom wird behandelt, Entstehungsursache bleibt | Pro bestätigter Zwischenbedingung gezielt nach vorgelagerten Ursachen fragen; letzte Antwort benötigt eigene Evidenz | Fünf ist eine Heuristik, kein mathematisches Tiefenziel [R45] |
+| **Jidoka / Andon** | Defekte werden in Release-/Integrationsstufen weitergetragen | Verifizierter Defekt löst ein lokales, differenziertes Release-Gate aus; produktive Veröffentlichungen gesondert autorisiert | Nicht jede Warnung darf globale Entwicklung blockieren [R45] |
+| **Poka-Yoke** | Wiederkehrende menschliche oder agentische Bedienfehler | Feste Typ-/Schema-/Invariantengates, kleine Regression, idempotente Eingänge | Neue Regeln können False Positives verursachen |
+| **Kaizen / PDCA** | Verbesserungen werden ohne Wirkungsnachweis dauerhaft eingebaut | Plan → isolierter Änderungsvorschlag → Check an Train/Held-out → Promote oder Revert | Keine unbegrenzte Selbständerung sicherheitskritischer Regeln [R45] |
+| **Pareto-Priorisierung** | Viele kleine Fehler verdecken wenige teure Fehlerklassen | Ranking nach gemessener Häufigkeit, Schwere, Rework-/Verifikationskosten | Keine unbewiesene 80/20-Behauptung |
+| **Prozessstabilität / Trendanalyse** | Lokal erfolgreiche Fixes verdecken langfristige Qualitätsverschlechterung | Zeitreihen über Regressionen, Wiederholungsfehler, falsche DONE-Meldungen, Kosten pro verifiziertem Fix | Aussage über Trend setzt vergleichbare Aufgabenklassen voraus |
+
+### 21.2 Ein Datenmodell, kein zweiter Ursachenbaum
+
+Der CI Agent verwendet denselben `cause_node`-/`cause_edge`-Graph wie die Diagnose. Nach einem verifizierten Repair wird für eine Ursache ein `prevention_candidate` mit `cause_id, evidence_refs, proposed_control, expected_effect, risk_class, experiment_id` erstellt. Vorbeugende Aktionen wie neue Regressionstests, angepasste Linter-Konfiguration oder sichere API-Checks werden **als eigene, versionierte Arbeit** behandelt. Das verhindert, dass eine erfolgreiche Reparatur stillschweigend in ein unkontrolliertes Refactoring umschlägt.
+
+### 21.3 Verbesserungs-FSM (nachgelagert, kein Ersatz der sechs Kern-FSMs)
+
+| Zustand | Event | Guard | Aktion | Folgezustand |
+|---|---|---|---|---|
+| `OBSERVED` | `CAUSE_CLUSTERED` | gleiche dokumentierte Fehlerklasse und belastbare Evidenz | Kosten-/Schadensmaß erfassen | `PRIORITIZED` |
+| `PRIORITIZED` | `PREVENTION_PROPOSED` | begrenzte Änderung und überprüfbare Hypothese | Präventionsvertrag einfrieren | `EXPERIMENT_READY` |
+| `EXPERIMENT_READY` | `RUN_APPROVED` | Budget und isolierte Umgebung autorisiert | Kontrollarm und Treatment fixieren | `MEASURING` |
+| `MEASURING` | `COMPARISON_COMPLETE` | unabhängige Receipts und keine Oracle-Veränderung | Wirkung, Kosten, Nebenwirkungen bewerten | `REVIEWED` |
+| `REVIEWED` | `PROMOTE` | vordefinierter Nutzen erreicht, keine verletzten Schutzinvarianten | Versionierte Kontrolle aktivieren | `ADOPTED` |
+| `REVIEWED` | `REJECT` | Nutzen fehlt oder Regression | Revert/Abbruch begründen | `REJECTED` |
+| `MEASURING` | `UNKNOWN / TIMEOUT` | fehlende oder unvollständige Evidenz | Nicht raten, Experiment reversibel suspendieren | `INCONCLUSIVE` |
+
+**Rechtegrenze:** Das CI-Lernen darf keine Prüforakel schwächen, keine Safety-Gates lockern, keine Secrets exponieren und keine neuen kostenpflichtigen CI-Läufe ohne Autorisierung starten. Es optimiert das **Vorgehen**, nicht die Definition von Wahrheit.
+
+### 21.4 Erfolgskriterien
+
+Pro Fehlerklasse werden `recurrence_rate`, `time_to_first_caused_condition`, `regression_escape_rate`, `oracle_failure_rate`, `mean_verified_repair_cost` und `interventions_per_verified_fix` vor/nach Verbesserung über vergleichbare Aufgaben erfasst. Die Differenz gilt nur mit dokumentierten Unsicherheiten und Negativkontrollen als Verbesserung. Die Fishbone-Map zeigt ausdrücklich unterschiedliche Markierungen für `Vermutung`, `durch Laufzeitbeobachtung gestützt`, `widerlegt` und `durch unabhängiges Ergebnis bestätigt`.
+
+**Quellen- und Methodenabgrenzung:** ASQ beschreibt das Fischgrätendiagramm als Werkzeug zur Strukturierung *möglicher* Ursachen [R44]. Toyota beschreibt Jidoka und kontinuierliche Kaizen-Arbeit als Grundpfeiler seines Produktionssystems [R45]. Daraus folgt **kein wissenschaftlich nachgewiesener numerischer Effekt** für Coding-Agenten; KOTZE muss diesen Nutzen eigenständig messen.
+
+---
+
+## 22. Quellenverzeichnis und prüfbare Zahlen
+
+**Statuskonvention:** `Preprint` = kein durch die Quelle bestätigtes Peer Review; `Conference` = referierte Konferenzveröffentlichung; `Primärdokumentation` = technische Veröffentlichung des Herstellers/Repos, keine wissenschaftliche Studie. `Locator: Abstract` bedeutet ausdrücklich: die Zahl steht im öffentlich überprüften Abstract und wird nicht einer ungeprüften Tabelle zugeordnet. Bei Links ohne überprüfte Seitenreferenz ist **kein konkreter Tabellenlocator behauptet**. Versionen sind nur dann als `vN` genannt, wenn sie im geprüften Quellmetadatensatz sichtbar waren. Quellen ohne harten Zahlenclaim haben `—`.
+
+| Ref | Primärquelle / persistenter Link | Version / Status | Zitierte Zahl und exakter Locator |
+|---|---|---|---|
+| **R01** | Xu et al., *Harness²: Recursive Agent Harnessing for an Open World*, [arXiv:2610.14224](https://arxiv.org/abs/2610.14224), [GitHub](https://github.com/google-research/harness2) | 2026, Preprint; Versionsstand im arXiv-Verlauf | Bis 11,5 / 4,5 / 11,8 Prozentpunkte je Benchmark: **Abstract**; Implementierung und Setup: README |
+| **R02** | Xia et al., *RRSI: Regularized Recursive Self-Improvement of Agent Harnesses*, [arXiv:2609.24972](https://arxiv.org/abs/2609.24972), [GitHub](https://github.com/google-research/rrsi) | 2026, Preprint | Bis +4,7 PP OOD und 30 % weniger Policy-Tokens: **Abstract** |
+| **R03** | Lin et al., *Agentic Harness Engineering*, [arXiv:2604.25850v4](https://arxiv.org/abs/2604.25850v4) | v4, 18.05.2026, Preprint | 69,7 % → 77,0 % Terminal-Bench 2 nach zehn Iterationen: **Abstract** |
+| **R04** | Fan et al., *An Empirical Study of Harness Design for Coding Agents*, [arXiv:2609.20804](https://arxiv.org/abs/2609.20804) | 2026, Preprint | 176 Konfigurationen / vier Modelle: **Abstract** |
+| **R05** | Hu et al., *Beyond the Model*, [arXiv:2609.32459](https://arxiv.org/abs/2609.32459) | 2026, Preprint | Keine Zahl im Konzept; **Abstract** zur Aufgabenabhängigkeit |
+| **R06** | Brilliantov et al., *How Much of a Harness Does a Strong Agent Need for Autonomous ML Engineering?*, [arXiv:2609.40303](https://arxiv.org/abs/2609.40303) | 2026, Preprint | Keine quantitative Zahl; **Abstract** |
+| **R07** | Xia et al., *Agentless*, [arXiv:2407.01489](https://arxiv.org/abs/2407.01489) | 2024, Preprint (Version über arXiv) | Baseline-Argument: **Abstract** |
+| **R08** | Yang et al., *SWE-agent*, [arXiv:2405.15793v3](https://arxiv.org/abs/2405.15793v3) | v3, NeurIPS 2024, **Conference** | Wirkung des Agent-Computer-Interfaces: **Abstract** |
+| **R09** | *Can Old Tests Do New Tricks for Resolving SWE Issues?* (TestPrune), [DOI:10.1145/3808148](https://doi.org/10.1145/3808148) | FSE 2026, **Conference** | Relative Verbesserungen der spezifischen Versuchsanordnungen: **Results im Volltext prüfen**, kein erfundener Tabellenlocator |
+| **R10** | Zhang et al., *SWE-Edit*, [arXiv:2604.26102](https://arxiv.org/abs/2604.26102), [GitHub](https://github.com/microsoft/SWE-Edit) | 2026, Preprint | 69,9 % → 72,0 %, Inferenzkosten −17,9 %: **GitHub README, Table 1** (500 Fälle, drei Läufe) |
+| **R11** | Kim et al., *Scaling Test-Time Compute for Agentic Coding*, [arXiv:2604.16529](https://arxiv.org/abs/2604.16529) | 2026, Preprint | 70,9 % → 77,6 % SWE-bench Verified: **Abstract** |
+| **R12** | Zeng et al., *Multi-step SWE*, [arXiv:2611.07166](https://arxiv.org/abs/2611.07166), [GitHub](https://github.com/Klavis-AI/Multi-step-SWE) | 2026, Preprint | 69 Ketten, 5–15 Schritte, 56,8 % Einzelschritte, 18,5 % vollständig: **Benchmark README und Abstract** |
+| **R13** | *E2E-SWE*, [GitHub](https://github.com/facebookresearch/E2E-SWE) | Primärdokumentation | 186 Repos, elf Sprachen: **README** |
+| **R14** | *mini-SWE-agent*, [GitHub](https://github.com/SWE-agent/mini-swe-agent) | Open Source / Primärdokumentation | Einfacher Shell-/Tool-Loop: **README** |
+| **R16** | *All Smoke, No Alarm: Oracle Signals in Agent-Authored Test Code*, [DOI:10.1109/AITest70988.2026.00038](https://doi.org/10.1109/AITest70988.2026.00038) | IEEE AITest 2026, **Conference** | 86.156 Testdatei-Patches, 80,2 % schwache/fehlende explizite Oracle-Signale: **Abstract** |
+| **R17** | OpenAI, *Harness engineering: leveraging Codex*, [Artikel](https://openai.com/index/harness-engineering/) | 11.02.2026, Engineering-Bericht | Keine hier übertragbare Benchmarkzahl; Fallbericht |
+| **R18** | OpenAI, *Codex as a platform: build on the open agent harness*, [Artikel](https://developers.openai.com/blog/codex-as-a-platform) | 19.08.2026, Entwicklerdokumentation | Agent-/SDK-Integration; keine wissenschaftliche Effektzahl |
+| **R19** | Anthropic, *Harness design for long-running application development*, [Artikel](https://www.anthropic.com/research/harness-design-long-running-apps) | 24.03.2026, Engineering-Bericht | Generator/Evaluator und Fresh Context, kein formaler kausaler Benchmark |
+| **R20** | Anthropic, *Harness Primitives for Long-Running Claude Agents*, [GitHub](https://github.com/anthropics/cwc-long-running-agents) | Primärdokumentation 2026, Demo-Muster | Default-FAIL, Fresh-Context-Verifier, Handoff; **README** |
+| **R21** | GitHub, [Copilot coding agent](https://docs.github.com/en/copilot/concepts/agents/coding-agent/about-coding-agent) | Offizielle Produktdokumentation (laufend) | Issue-/PR-Workflow, keine wissenschaftliche Effektzahl |
+| **R23** | GitHub, [Agentic Workflows](https://github.com/github/gh-aw) | Open-Source-Repository/Primärdokumentation | Ereignisbasierte Ausführung; keine vergleichbare wissenschaftliche Effektzahl |
+| **R24** | SQLite, [WAL und Transaktionen](https://www.sqlite.org/wal.html), [Isolierung](https://www.sqlite.org/isolation.html) | Offizielle technische Dokumentation | ACID-/WAL-Semantik, kein Benchmarkerfolg |
+| **R25** | libgit2, [Repository](https://github.com/libgit2/libgit2) | Open-Source-Dokumentation, GPLv2 mit Linking Exception | Git-Schnittstelle/Lizenz, keine Benchmarkzahl |
+| **R26** | Tree-sitter, [Repository](https://github.com/tree-sitter/tree-sitter) | Open-Source-Dokumentation, MIT | Parser-/Syntaxbaum-Schnittstelle |
+| **R27** | Farzandway/Ghassemi, *Automated Repair of C Programs Using LLMs*, [arXiv:2509.01947v1](https://arxiv.org/html/2509.01947v1) | v1, 02.09.2025, Preprint | 3.902 Codeflaws-Bugs, 44,93 % Reparaturerfolg: **Abstract und Abschnitt 5 Results**; SBFL: Abschnitt 2.2 |
+| **R29** | Yang et al., *CodeClash*, [PMLR 306](https://proceedings.mlr.press/v306/yang26aq.html) | ICML 2026, **Conference** | Zielorientierte iterierte Softwareentwicklung, **Abstract** |
+| **R31** | OpenAI, *Separating signal from noise in coding evaluations*, [Artikel](https://openai.com/index/separating-signal-from-noise-coding-evaluations/) | 08.07.2026, Forschungs-/Benchmark-Audit | Ca. 30 % fehlerhafte SWE-bench-Pro-Tasks: **Ergebnisse im Artikel**, nicht blind als Benchmarkwahrheit übernehmen |
+| **R32** | Bayessche Inferenz / Likelihood-Ratio als **statistische Methodik** | Mathematische Grundlage; **noch kein empirisch kalibriertes Software-Repair-Modell** | Im Konzept **kein** gemessener Effektnachweis; Ochiai ≠ Posterior |
+| **R33** | Wang et al., *ReMCTS*, [arXiv:2609.34717v2](https://arxiv.org/abs/2609.34717), [GitHub](https://github.com/AkieSUKI/ReMCTS) | v2, 27.10.2026, zur EMNLP 2026 angekündigt | 8 von 10 Modell-Datensatz-Paaren: **Abschnitt 4.2, Table 1**; Kosten/Nutzen: **Abschnitt 4.4, Table 2** |
+| **R34** | Hypothesis, [offizielle Dokumentation](https://hypothesis.readthedocs.io/en/latest/) | Tool-Dokumentation, kein Paper-Effektnachweis | Property-Based Testing / Shrinking |
+| **R35** | mutmut, [GitHub](https://github.com/boxed/mutmut) | Tool-Dokumentation, kein Paper-Effektnachweis | Mutation Testing; keine wissenschaftliche 85%-Pflichtschwelle |
+| **R36** | *LongHorizon-Harness: Advancing Long-Horizon Agents for Real-World Tasks*, [arXiv:2608.01964](https://arxiv.org/abs/2608.01964) | 2026, Preprint | Managed Execute Audit, selbstständige Zustandsprüfung; **Abstract** |
+| **R37** | yyjson, [GitHub](https://github.com/ibireme/yyjson) | C-Bibliothek / MIT | JSON-Parsing, keine Effektstudie |
+| **R38** | bubblewrap, [GitHub](https://github.com/containers/bubblewrap); Landlock, [Linux-Dokumentation](https://docs.kernel.org/userspace-api/landlock.html) | Offizielle technische Dokumentation | Sandbox-Bausteine, aber ohne Policy keine vollständige Sicherheitsgarantie |
+| **R39** | Tran, *Open-Source LLM-Driven Formal Verification*, [arXiv:2607.28877](https://arxiv.org/abs/2607.28877) | 2026, Preprint | **Abstract:** Machbarkeitsstudie RTL/Yosys/Z3; **kein** allgemeiner Software-Korrektheitsbeweis |
+
+| **R40** | Wu et al., *From Guessing to Seeing: Enhancing LLM-Based Program Repair via Trace-Guided Multi-strategy Debate*, [arXiv:2604.02647v2](https://arxiv.org/html/2604.02647v2), [DOI:10.1145/3832783.3837458](https://doi.org/10.1145/3832783.3837458), [Replikationspaket](https://doi.org/10.5281/zenodo.19252356) | v2 06.08.2026; **ASE 2026 Conference** | 392 vs. 452 plausible, REINFIX 241/291: **Tabelle 3**; 177/154/158/102: **Tabelle 6**; Runden 326/359/380/388/392: **Abbildung 4**; Probe-Erfolg 631/673 etc.: **Tabelle 7**; Tokens: **Tabellen 9–10** |
+| **R41** | Bouzenia et al., *TraceFixer: Execution Trace-Driven Program Repair*, [arXiv:2304.12743v1](https://arxiv.org/abs/2304.12743v1) | v1 25.04.2023, Preprint; Publikationsstatus nicht aus Arxiv-Metadaten belegt | Single-Line Python, gewünschter Zwischenzustand als Eingabe, 10/20 reale Bugs: **Abstract** |
+| **R42** | Haque et al., *Towards Effectively Leveraging Execution Traces for Program Repair with Code LLMs*, [DOI:10.18653/v1/2025.knowledgenlp-1.17](https://doi.org/10.18653/v1/2025.knowledgenlp-1.17), [ACL Anthology](https://aclanthology.org/2025.knowledgenlp-1.17/) | KnowledgeNLP Workshop 2025, referierte Veröffentlichung | Rohtraces verbessern nur **2/6 Datensatz-/Modellkonfigurationen**, **Abstract**; strukturierte Traces wirken verlässlicher |
+| **R43** | Huang et al., *TraceCoder: A Trace-Driven Multi-Agent Framework for Automated Debugging of LLM-Generated Code*, [arXiv:2602.06875](https://arxiv.org/abs/2602.06875), [DOI:10.1145/3744916.3773187](https://doi.org/10.1145/3744916.3773187), [GitHub](https://github.com/CSMA-Research-Group/TraceCoder) | ICSE 2026 Conference | Laufzeitinstrumentierung, Historical Lesson Learning und Rollback; bis 34,43 % relative Verbesserung im geprüften Setup: **Abstract**, keine Transfergarantie |
+| **R44** | American Society for Quality, [Fishbone Diagram](https://asq.org/quality-resources/fishbone) | Primärdokumentation Qualitätsmanagement | Hypothesenstrukturierung und Ursache-Wirkung-Darstellung, **Overview**; kein Software-Reparaturbenchmark |
+| **R45** | Toyota Motor Corporation, [Toyota Production System](https://global.toyota/en/company/vision-and-philosophy/production-system/); [Toyota Quality](https://www.toyota-europe.com/about-us/toyota-quality) | Primärquellen Unternehmens-/Prozessmethodik | Jidoka, Kaizen und 5 Whys, **Produktionssystem-/Qualitätsabschnitte**; kein Coding-Agent-Erfolgsnachweis |
+
+**Quellenhygiene:** Nicht belegte bzw. nicht verwendete Altkennungen `R15`, `R22`, `R28`, `R30` werden nicht mehr als wissenschaftliche Beweise geführt. Die früheren internen `Pxx`-Kennungen sind **keine öffentlichen Quellen** und werden aus diesem öffentlichen Dokument entfernt. Sie können intern in einem separaten, nicht veröffentlichten Herkunfts-/Paritätsregister verwaltet werden. Diese öffentliche Fassung nennt stattdessen reproduzierbare Verfahren, technische Verträge und öffentliche Primärquellen.
+
+**Quellenversionen und rechtliche Grenzen:** Für arXiv-Preprints ist der angegebene Versionsstand relevant; Veröffentlichungen können sich ändern. Die Übernahme einer *Methode* ist keine pauschale Lizenz zum Kopieren ihres Implementierungscodes. Quellcodes nur nach individueller Lizenzprüfung, für öffentliche Artefakte keine privaten Bibliotheken oder Betriebsdaten.
