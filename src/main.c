@@ -31,7 +31,7 @@ static int usage(void){
           "Usage: kotze-core DB COMMAND ...\n"
           " create ID REQ_DIGEST ORIGINAL_REQUEST BASE_SHA CONTRACT_HASH CONTRACT_TEXT MODE DELIVERY_REQUIRED BUDGET\n"
           " status WORK_ID\n"
-          " event WORK_ID EVENT_ID EVENT ACTOR EVIDENCE CANDIDATE_SHA ORACLE_HASH CONTRACT_HASH REVISION\n"
+          " event WORK_ID EVENT_ID EVENT ACTOR EVIDENCE CANDIDATE_SHA ORACLE_HASH CONTRACT_HASH CONTRACT_TEXT REVISION\n"
           " option-add WORK_ID OPTION_ID ORDINAL HYPOTHESIS\n"
           " option-decide WORK_ID OPTION_ID REFUTED|SUPPORTED|INAPPLICABLE EVIDENCE\n"
           " option-next WORK_ID\n"
@@ -59,11 +59,11 @@ int main(int argc,char **argv){
             w.id,w.state,w.mode,(long long)w.revision,(long long)w.evidence_epoch,
             w.patch_state,w.verification_state,w.trajectory_state,w.effect_state,
             w.actions_reserved,w.action_budget,w.candidate_sha,w.oracle_hash,w.resume_state);
-    }else if(!strcmp(cmd,"event")&&argc==12){
-        kotze_role actor;int valid_rev=0;int64_t rev=revision(argv[11],&valid_rev);
+    }else if(!strcmp(cmd,"event")&&argc==13){
+        kotze_role actor;int valid_rev=0;int64_t rev=revision(argv[12],&valid_rev);
         if(!role(argv[6],&actor)||!valid_rev)ok=0;
         if(ok){kotze_event e={argv[3],argv[4],argv[5],actor,rev,
-            optional(argv[7]),optional(argv[8]),optional(argv[9]),optional(argv[10])};
+            optional(argv[7]),optional(argv[8]),optional(argv[9]),optional(argv[10]),optional(argv[11])};
             rc=kotze_apply_event(k,&e);}
     }else if(!strcmp(cmd,"option-add")&&argc==7){
         int ordinal=0;if(!number(argv[5],&ordinal))ok=0;

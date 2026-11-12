@@ -75,7 +75,11 @@ int kotze_open(kotze_t **out, const char *db_file) {
         " event_id TEXT PRIMARY KEY, work_id TEXT NOT NULL REFERENCES works(id), name TEXT NOT NULL,"
         " actor INTEGER NOT NULL, evidence_ref TEXT NOT NULL, candidate_sha TEXT NOT NULL,"
         " oracle_hash TEXT NOT NULL, contract_hash TEXT NOT NULL, expected_revision INTEGER NOT NULL,"
-        " resulting_revision INTEGER NOT NULL);"
+        " resulting_revision INTEGER NOT NULL, contract_text TEXT NOT NULL DEFAULT '');"
+        "CREATE TABLE IF NOT EXISTS contract_versions ("
+        " work_id TEXT NOT NULL REFERENCES works(id), revision INTEGER NOT NULL,"
+        " contract_hash TEXT NOT NULL, contract_text TEXT NOT NULL, evidence_ref TEXT NOT NULL,"
+        " PRIMARY KEY(work_id,revision));"
         "CREATE TABLE IF NOT EXISTS options ("
         " work_id TEXT NOT NULL REFERENCES works(id), option_id TEXT NOT NULL, ordinal INTEGER NOT NULL,"
         " hypothesis TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'OPEN', evidence_ref TEXT NOT NULL DEFAULT '',"
@@ -133,6 +137,10 @@ int kotze_create_work(kotze_t *k, const kotze_work_spec *w) {
     bind(s,1,w->id);bind(s,2,w->request_digest);bind(s,3,w->original_request);
     bind(s,4,w->base_sha);bind(s,5,w->contract_hash);bind(s,6,w->contract_text);bind(s,7,w->mode);
     sqlite3_bind_int(s,8,w->delivery_required);sqlite3_bind_int(s,9,w->action_budget);
+    rc=done(k,s);if(rc<0)return commit(k,rc);
+    rc=prepare(k,&s,"INSERT INTO contract_versions(work_id,revision,contract_hash,contract_text,evidence_ref) VALUES(?,0,?,?,?)");
+    if(rc<0)return commit(k,rc);
+    bind(s,1,w->id);bind(s,2,w->contract_hash);bind(s,3,w->contract_text);bind(s,4,"INITIAL_AUTHORITY");
     return commit(k,done(k,s));
 }
 
@@ -174,11 +182,12 @@ int kotze_apply_event(kotze_t *k,const kotze_event *e) {
        (e->candidate_sha && strlen(e->candidate_sha)>128)||
        (e->oracle_hash && strlen(e->oracle_hash)>128)||
        (e->contract_hash && strlen(e->contract_hash)>128)||
+       (e->contract_text && strlen(e->contract_text)>131072)||
        e->actor<KOTZE_OWNER||e->actor>KOTZE_VERIFIER||e->expected_revision<0)
         return fail(k,KOTZE_DENIED,"Invalid event fields");
     if(begin(k)<0)return KOTZE_ERROR;
     sqlite3_stmt *s=NULL;
-    int rc=prepare(k,&s,"SELECT work_id,name,actor,evidence_ref,candidate_sha,oracle_hash,contract_hash,expected_revision FROM events WHERE event_id=?");
+    int rc=prepare(k,&s,"SELECT work_id,name,actor,evidence_ref,candidate_sha,oracle_hash,contract_hash,expected_revision,contract_text FROM events WHERE event_id=?");
     if(rc<0)return commit(k,rc);
     bind(s,1,e->event_id);
     int step=sqlite3_step(s);
@@ -190,7 +199,8 @@ int kotze_apply_event(kotze_t *k,const kotze_event *e) {
             &&eq((const char*)sqlite3_column_text(s,4),e->candidate_sha)
             &&eq((const char*)sqlite3_column_text(s,5),e->oracle_hash)
             &&eq((const char*)sqlite3_column_text(s,6),e->contract_hash)
-            &&sqlite3_column_int64(s,7)==e->expected_revision;
+            &&sqlite3_column_int64(s,7)==e->expected_revision
+            &&eq((const char*)sqlite3_column_text(s,8),e->contract_text);
         sqlite3_finalize(s);
         return commit(k,same?KOTZE_REPLAY:fail(k,KOTZE_CONFLICT,"Event ID reused with different content"));
     }
@@ -212,7 +222,7 @@ int kotze_apply_event(kotze_t *k,const kotze_event *e) {
     #define AT(n) eq(v.state,(n))
     if(IS("CONTRACT_VALID")&&AT("REQUIREMENTS")&&hasproof(e)) {next="REPRODUCING";new_evidence=1;}
     else if(IS("ASK_CLARIFICATION")&&(AT("REQUIREMENTS")||AT("DIAGNOSING")||AT("PLANNING"))&&hasproof(e)) {next="AWAITING_CLARIFICATION";resume=v.state;}
-    else if(IS("ANSWER_ACCEPTED")&&AT("AWAITING_CLARIFICATION")&&e->actor==KOTZE_OWNER&&valid(e->contract_hash,128)&&hasproof(e)) {
+    else if(IS("ANSWER_ACCEPTED")&&AT("AWAITING_CLARIFICATION")&&e->actor==KOTZE_OWNER&&valid(e->contract_hash,128)&&valid(e->contract_text,131072)&&hasproof(e)) {
         next="REQUIREMENTS";contract=e->contract_hash;verify="STALE";new_evidence=1;
     }
     else if(IS("BUG_REPRODUCED")&&AT("REPRODUCING")&&hasproof(e)&&valid(e->oracle_hash,128)) {
@@ -270,12 +280,25 @@ int kotze_apply_event(kotze_t *k,const kotze_event *e) {
     #undef IS
     #undef AT
     if(!next||!supported_mode(mode))return commit(k,fail(k,KOTZE_DENIED,"Event guard rejected transition"));
-    rc=prepare(k,&s,"INSERT INTO events(event_id,work_id,name,actor,evidence_ref,candidate_sha,oracle_hash,contract_hash,expected_revision,resulting_revision) VALUES(?,?,?,?,?,?,?,?,?,?)");
+    if(e->contract_text && e->contract_text[0] && !eq(e->name,"ANSWER_ACCEPTED"))
+        return commit(k,fail(k,KOTZE_DENIED,"Contract body permitted only in authorized answer"));
+    if(eq(e->name,"ANSWER_ACCEPTED")) {
+        rc=prepare(k,&s,"INSERT INTO contract_versions(work_id,revision,contract_hash,contract_text,evidence_ref) VALUES(?,?,?,?,?)");
+        if(rc<0)return commit(k,rc);
+        bind(s,1,e->work_id);sqlite3_bind_int64(s,2,v.revision+1);
+        bind(s,3,e->contract_hash);bind(s,4,e->contract_text);bind(s,5,e->evidence_ref);
+        rc=done(k,s);if(rc<0)return commit(k,rc);
+        rc=prepare(k,&s,"UPDATE works SET contract_text=? WHERE id=?");
+        if(rc<0)return commit(k,rc);
+        bind(s,1,e->contract_text);bind(s,2,e->work_id);
+        rc=done(k,s);if(rc<0)return commit(k,rc);
+    }
+    rc=prepare(k,&s,"INSERT INTO events(event_id,work_id,name,actor,evidence_ref,candidate_sha,oracle_hash,contract_hash,expected_revision,resulting_revision,contract_text) VALUES(?,?,?,?,?,?,?,?,?,?,?)");
     if(rc<0)return commit(k,rc);
     bind(s,1,e->event_id);bind(s,2,e->work_id);bind(s,3,e->name);sqlite3_bind_int(s,4,e->actor);
     bind(s,5,e->evidence_ref);bind(s,6,e->candidate_sha);bind(s,7,e->oracle_hash);
     bind(s,8,e->contract_hash);sqlite3_bind_int64(s,9,e->expected_revision);
-    sqlite3_bind_int64(s,10,v.revision+1);
+    sqlite3_bind_int64(s,10,v.revision+1);bind(s,11,e->contract_text);
     rc=done(k,s);if(rc<0)return commit(k,rc);
     rc=prepare(k,&s,"UPDATE works SET state=?,patch_state=?,verification_state=?,trajectory_state=?,effect_state=?,resume_state=?,candidate_sha=?,oracle_hash=?,contract_hash=?,mode=?,revision=revision+1,evidence_epoch=evidence_epoch+? WHERE id=? AND revision=?");
     if(rc<0)return commit(k,rc);

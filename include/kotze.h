@@ -44,6 +44,7 @@ typedef struct {
     const char *candidate_sha;
     const char *oracle_hash;
     const char *contract_hash;
+    const char *contract_text; /* required for ANSWER_ACCEPTED; versioned, never silently overwritten */
 } kotze_event;
 
 typedef struct {

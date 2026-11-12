@@ -21,7 +21,7 @@ No CI or cloud services are required. The test command builds and executes a loc
 DB=./kotze.sqlite3
 ./build/kotze-core "$DB" create issue-42 req-digest 'Repair the price calculation without changing the business rule' base-sha contract-digest 'Approved price calculation and acceptance test' PLAN 0 10
 ./build/kotze-core "$DB" status issue-42
-./build/kotze-core "$DB" event issue-42 ev-1 CONTRACT_VALID CONTROLLER approved - - - 0
+./build/kotze-core "$DB" event issue-42 ev-1 CONTRACT_VALID CONTROLLER approved - - - - 0
 ./build/kotze-core "$DB" option-add issue-42 cause-a 1 'Possible incorrect branch'
 ./build/kotze-core "$DB" option-add issue-42 cause-b 2 'Possible stale input data'
 ./build/kotze-core "$DB" option-next issue-42

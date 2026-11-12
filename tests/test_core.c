@@ -1,4 +1,5 @@
 #include "kotze.h"
+#include <sqlite3.h>
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,7 +13,7 @@ static kotze_event make_event(kotze_t *k,const char *work_id,const char *id,cons
                               kotze_role role,const char *ev,const char *candidate,const char *oracle,const char *contract){
     kotze_work_view w;
     OK(kotze_get_work(k,work_id,&w));
-    kotze_event out={work_id,id,name,role,w.revision,ev,candidate,oracle,contract};
+    kotze_event out={work_id,id,name,role,w.revision,ev,candidate,oracle,contract,NULL};
     return out;
 }
 static void move(kotze_t *k,const char *work_id,const char *id,const char *name,kotze_role role,
@@ -44,7 +45,10 @@ int main(void){
     move(k,"work-1","e1","ASK_CLARIFICATION",KOTZE_CONTROLLER,"decision-required",NULL,NULL,NULL);
     check_state(k,"work-1","AWAITING_CLARIFICATION");
     STATUS(kotze_admit_action(k,"work-1","a0","READ","read repository","local-env",0),KOTZE_DENIED);
-    move(k,"work-1","e2","ANSWER_ACCEPTED",KOTZE_OWNER,"answer-1",NULL,NULL,"contract-v2");
+    kotze_event answer=make_event(k,"work-1","e2","ANSWER_ACCEPTED",KOTZE_OWNER,"answer-1",NULL,NULL,"contract-v2");
+    STATUS(kotze_apply_event(k,&answer),KOTZE_DENIED); /* no contract body, no authorized revision */
+    answer.contract_text="Updated domain contract from authorized answer";
+    OK(kotze_apply_event(k,&answer));
     check_state(k,"work-1","REQUIREMENTS");
     move(k,"work-1","e3","CONTRACT_VALID",KOTZE_CONTROLLER,"spec-accepted",NULL,NULL,NULL);
     move(k,"work-1","e4","BUG_REPRODUCED",KOTZE_VERIFIER,"baseline-fails",NULL,"oracle-hash-1",NULL);
@@ -127,6 +131,17 @@ int main(void){
     OK(kotze_next_option(k,"work-1",next,sizeof(next)));
     assert(strcmp(next,"hyp-5")==0);
     kotze_close(k);
+    sqlite3 *db=NULL;
+    assert(sqlite3_open_v2(filename,&db,SQLITE_OPEN_READONLY,NULL)==SQLITE_OK);
+    sqlite3_stmt *st=NULL;
+    assert(sqlite3_prepare_v2(db,"SELECT contract_hash,contract_text FROM contract_versions WHERE work_id='work-1' ORDER BY revision",-1,&st,NULL)==SQLITE_OK);
+    assert(sqlite3_step(st)==SQLITE_ROW);
+    assert(strcmp((const char*)sqlite3_column_text(st,0),"contract-v1")==0);
+    assert(sqlite3_step(st)==SQLITE_ROW);
+    assert(strcmp((const char*)sqlite3_column_text(st,0),"contract-v2")==0);
+    assert(strcmp((const char*)sqlite3_column_text(st,1),"Updated domain contract from authorized answer")==0);
+    assert(sqlite3_step(st)==SQLITE_DONE);
+    sqlite3_finalize(st);sqlite3_close(db);
     unlink(filename);
     char wal[4096],shm[4096];snprintf(wal,sizeof(wal),"%s-wal",filename);snprintf(shm,sizeof(shm),"%s-shm",filename);
     unlink(wal);unlink(shm);

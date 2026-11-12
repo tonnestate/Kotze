@@ -17,7 +17,7 @@ On each `kotze_apply_event`:
 1. `BEGIN IMMEDIATE` takes the SQLite writer reservation.
 2. Look up the immutable `event_id`: exact replay returns `KOTZE_REPLAY`; payload mismatch returns `KOTZE_CONFLICT`.
 3. Load work state and enforce `expected_revision`, accepted contract digest (if supplied), actor role and all event-specific guards.
-4. Persist event and coupled work/patch/verification/trajectory/effect statuses in the **same SQLite transaction**.
+4. Persist event and coupled work/patch/verification/trajectory/effect statuses in the **same SQLite transaction**. Authorized answer events additionally append an immutable `contract_versions` revision with its *complete new body* and hash; no hash-only contract mutation is allowed.
 5. Commit on success; roll back on denial or errors.
 
 Work is never completed from the worker's claim alone. `VERIFY_PASS` requires the verifier role, an evidence reference, and exact candidate and frozen-oracle matching. Delivery-required work remains `DELIVERING` until `DELIVERY_CONFIRMED`. `NO_DEFECT_PROVEN` terminates as `RESOLVED_NO_DEFECT`, rather than a false repair failure. `AWAITING_CLARIFICATION` exits through an authorized answer, and `BLOCKED` can resume with owner authority if guards permit.
