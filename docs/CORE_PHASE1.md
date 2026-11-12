@@ -46,6 +46,16 @@ This mechanism is conservative: it can block a legitimate repeated sampling run 
 
 Only an `OWNER` event can change mode. Mode changes are rejected while the work is actively repairing or verifying.
 
+## Native repair episode memory (implemented in concept branch)
+
+The `repair_episodes` SQLite table is additive, using the existing native transaction and foreign-key setup. `kotze_record_repair_episode` accepts an episode ID, work and cohort metadata, and the ID of an **existing** verifier-reported `VERIFY_PASS` or `VERIFY_FAIL` event with a matching work ID and nonempty evidence, candidate and oracle references. It derives the recorded outcome from that event. The same verifier event cannot count twice. Identical replays return `KOTZE_REPLAY`, conflicting identity or double-counting returns `KOTZE_CONFLICT`.
+
+`kotze_get_repair_stats` returns the exact cohort's `verifier_reported_pass` and `verifier_reported_fail` counts, including zeros for unseen strategies. Context and repair-strategy labels are host-supplied categories, **not** verified causal diagnoses. Counts are **not probabilities** and never grant execution rights, candidate promotion, independent verification, or statistical confidence. Unknown/inconclusive states remain in the main journal; they are not silently counted as failures or successes.
+
+**Trust limit:** a `KOTZE_VERIFIER` role argument is not authenticated. The external verifier's process and protected oracle boundary are still missing. This ledger is an audit/accounting foundation, not certified zero-trust evidence.
+
+**Test status:** source-level test cases were added for valid pass/fail binding, replay, tamper attempts, duplicate proof-event counting, exact cohort isolation and reopen persistence. No compiler, tests, hosted CI, model requests or benchmark runs were executed when adding this slice.
+
 ## Missing items — explicit next engineering boundary
 
 This is not yet a full implementation of the research paper. The following are intentionally *not* claimed:

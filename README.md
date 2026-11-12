@@ -6,6 +6,12 @@ The [external skill grader](docs/SKILL_GRADER.md) performs paired task evaluatio
 
 **This is not yet an autonomous coding agent.** No model calls, shell execution, source-code editing, process sandbox, real GitHub publishing, or independent verifier have been implemented. The CLI is a trusted local diagnostic interface, **not** an externally accessible API or a security boundary against malicious workers. A future host service must enforce caller identity and execute only journaled, authorized tool actions. In particular, passing `VERIFIER` on this CLI is *not* independent proof by itself.
 
+## Native repair-memory slice (KOTZE-4-2 concept branch)
+
+The C11 core now has a transactional, **verifier-event-bound repair-episode ledger**. It records exactly one repair episode per existing `VERIFY_PASS` or `VERIFY_FAIL` event and exposes exact-cohort counts by capability, environment, context, failure class and strategy. Replayed IDs cannot inflate results. No autonomous learning policy, real Repair Pair, authenticated verifier or PLE agent has yet been implemented. The fields are named **verifier-reported** because the existing C ABI has no OS-level verifier authentication.
+
+See [the Second Brain design](docs/STATISTICAL-SECOND-BRAIN-AND-REPAIR-PAIR.md) and [core implementation notes](docs/CORE_PHASE1.md).
+
 ## Local build (no GitHub Actions / hosted runners)
 
 Requirements: C11 compiler, SQLite3 development library, `make`.
