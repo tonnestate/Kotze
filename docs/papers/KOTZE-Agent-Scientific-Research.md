@@ -674,3 +674,70 @@ The following are primary publications or first-party technical documents. **E1*
 ### Source integrity statement
 
 All empirical figures above belong to the cited authors and are **not** independently replicated by KOTZE Agent. The present document is prepared as a public research manuscript without including nonpublic project implementation names, private source contents, secrets, or unverifiable descriptions of deployed systems. All proposed methods require independent implementation and acceptance testing before operational claims can be made.
+
+
+
+---
+
+## Appendix A. Anthropic's Existing Loop Controls and the Non-Duplication Boundary
+
+### A.1 Skills, hooks, native tool runners, and durable state are different layers
+
+An **Agent Skill** is an on-demand procedural resource, not a mandatory state manager. Anthropic documents the progressive loading of skill metadata and task-specific instructions, while its Claude Code guidance distinguishes persistent project rules, skills, hooks, and subagents [28]. KOTZE should use skills for work procedures that are too specialized to carry in every model prompt: browser cascade forensics, scoped language-specific diagnosis, differential model checking, and release verification. It should not rely on an advisory skill to enforce hard policy.
+
+A **hook** is an event-attached control point. Claude Code's PreToolUse hooks can stop particular tool calls, SessionStart hooks can restore context, PostCompact hooks can reintroduce selected instructions, and Stop hooks can trigger deterministic completion checks [28,29]. However, a hook only observes/enforces the operations to which its host exposes and applies it. A standalone worker that executes opaque internal processes cannot be assumed to provide full host observation. KOTZE's own directly mediated execution contract remains authoritative for its minimum viable worker; optional third-party coding workers require OS-enforced isolation and external-state verification.
+
+A **model tool runner** manages the basic model/tool/result sequence and can expose interception and maximum-iteration limits [30]. These are useful donor patterns. A maximum iteration count prevents unbounded resource spending but does not distinguish progress from repetition; a Stop event means the model ceased requesting tools, not that the original user requirement was fulfilled.
+
+### A.2 What Anthropic actually investigated
+
+Anthropic's published long-running-agent harness [31] employs an initial setup phase that writes environment initialization, a structured feature list, and a progress log. Subsequent coding sessions inspect those artifacts and git history, perform incremental work, and verify features in a real running application. The research account explicitly records failures of context handoff, premature DONE, and end-to-end verification. It **does not** establish a universal anti-loop guarantee or provide calibrated KOTZE task-completion rates.
+
+Anthropic also publishes guidance for skill-based verification loops [32]. These loops are valuable procedural reuse, but replacing manual verification steps with a skill does not prove that the agent's original business understanding is correct. Hence KOTZE separates **domain authority**, **executor observation**, and **independently administered oracle**.
+
+The independent community project **OpenClaude** [33] describes itself as derived from Claude Code and modified for multiple model providers. It is not Anthropic's official Claude Code product. Its licensing statements distinguish community modifications from derived upstream code; component reuse requires an exact revision and license review. Neither provenance nor compatibility should be inferred merely from a familiar project name.
+
+### A.3 Proposed deterministic Loop-Convergence Gate
+
+The loop guard must compare **canonical execution state**, not surface wording in successive model messages. For each admitted action, record the tuple:
+
+\`\`\`text
+(work_id, domain_contract_hash, base_sha, candidate_sha,
+ oracle_hash, environment_digest, hypothesis_id,
+ normalized_action_digest, evidence_revision, outcome_digest)
+\`\`\`
+
+The admission algorithm distinguishes four situations:
+
+| Observation | Deterministic disposition | Rationale |
+|---|---|---|
+| Same action, same source/environment/oracle, same result, no changed discriminating evidence | DENY_REPEAT and RECOMPOSE | Repetition yields no expected information |
+| Same test command, changed candidate SHA or changed relevant input | ALLOW_RETEST | Testing changed program state is meaningful |
+| Repeated compact/restart cycle with no new durable event | STOP_COMPACT_LOOP and recover from canonical state | Do not repeatedly re-inject the same oversized transcript |
+| A previously refuted hypothesis is proposed again | REJECT_HYPOTHESIS unless new falsifier-changing evidence is cited | Keep rejected knowledge beyond session resets |
+| No valid next probe within budget | BLOCKED_WITH_EVIDENCE | Do not substitute activity for autonomous progress |
+| A required business/domain requirement lacks accepted verification | REMAIN_INCOMPLETE | Technical stop or passing unit test cannot close the work |
+
+**No arbitrary “retry five times” is a sufficient correctness policy.** Numeric upper bounds remain necessary for resource safety, but legitimate retries depend on a changed candidate, environment, or diagnostic question. A work item may resume only with the original domain contract and prior falsifications intact.
+
+A **progress event** requires a durable and decision-relevant change: a new verified runtime observation, a falsified hypothesis, a supported causal relationship, a new candidate revision, independent verification outcome, or an explicitly authorized change to the business contract. Reading more tokens, writing another summary, or repeating a tool call is not progress by itself. This definition is intentionally operational and must be tested for false blocks in slow-but-valid tasks.
+
+### A.4 Scientific test and falsification
+
+A controlled comparison should measure A0 (worker alone), A1 (worker plus common iteration cap), A2 (worker plus native hooks/progress files), and A3 (A2 plus KOTZE durable state-identity gate), using identical tasks, model snapshots, time budgets, and independent evaluators. Inject context resets after preserved and lost-content boundaries. Include negative controls: a repeated test following a genuine patch; a flaky test needing authorized repeat samples; an unchanged command with changed environment; and a truly identical action that previously yielded the same error. Primary anti-loop outcomes are repeated-no-information actions, unjustified completion rate, false-block rate, and independently verified repair rate.
+
+**Adoption gate:** retain the extra native implementation only if it improves at least one prespecified reliability endpoint without materially harming successful completion or cost. Model-training results such as DeLoop cannot be claimed as evidence that this rule-based intervention will perform the same way.
+
+### Additional primary and first-party references
+
+[28] Anthropic. *Steering Claude Code: When to Use CLAUDE.md, Skills, Hooks, Rules, Subagents, and More*. 18 June 2026. First-party engineering guidance, not peer-reviewed. https://claude.com/blog/steering-claude-code-skills-hooks-rules-subagents-and-more
+
+[29] Anthropic. *Claude Code Power User Tips*. Official Help Center. Lifecycle events including SessionStart, PreToolUse, Stop, and PostCompact. https://support.claude.com/en/articles/14554000-claude-code-power-user-tips
+
+[30] Anthropic. *How Tool Use Works* and SDK tool-runner guidance. First-party platform documentation, including tool-result handling, stop reasons and bounded loops. https://platform.claude.com/docs/en/agents-and-tools/tool-use/how-tool-use-works
+
+[31] Anthropic Engineering. *Effective Harnesses for Long-Running Agents*. 26 November 2025. First-party engineering account. https://www.anthropic.com/research/effective-harnesses-for-long-running-agents
+
+[32] Anthropic. *Building Verification Loops in Claude Code with Skills*. 22 July 2026. First-party engineering guidance. https://claude.com/blog/building-verification-loops-in-claude-code-with-skills
+
+[33] Gitlawb. *OpenClaude*. GitHub repository and project self-description. Independent community project, not affiliated with Anthropic. https://github.com/Gitlawb/openclaude
