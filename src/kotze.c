@@ -90,6 +90,14 @@ int kotze_open(kotze_t **out, const char *db_file) {
         " oracle_hash TEXT NOT NULL, environment_digest TEXT NOT NULL, evidence_epoch INTEGER NOT NULL,"
         " state TEXT NOT NULL DEFAULT 'RESERVED', outcome_digest TEXT NOT NULL DEFAULT '',"
         " UNIQUE(work_id,fingerprint,source_sha,oracle_hash,environment_digest,evidence_epoch));"
+        "CREATE TABLE IF NOT EXISTS effect_dispatch ("
+        "action_id TEXT PRIMARY KEY REFERENCES actions(action_id),"
+        "work_id TEXT NOT NULL REFERENCES works(id),"
+        "effect_key TEXT NOT NULL UNIQUE,"
+        "state TEXT NOT NULL CHECK(state IN ('PENDING','DISPATCHING','UNKNOWN','CONFIRMED','FAILED')) DEFAULT 'PENDING',"
+        "token INTEGER NOT NULL DEFAULT 0 CHECK(token >= 0),"
+        "receipt_ref TEXT NOT NULL DEFAULT '');"
+        "CREATE INDEX IF NOT EXISTS idx_effect_dispatch_work ON effect_dispatch(work_id,state);"
         "CREATE TABLE IF NOT EXISTS successes ("
         " capability_key TEXT NOT NULL, environment_digest TEXT NOT NULL, work_id TEXT NOT NULL REFERENCES works(id),"
         " candidate_sha TEXT NOT NULL, receipt_ref TEXT NOT NULL,"
@@ -176,6 +184,28 @@ static int supported_mode(const char *s){return eq(s,"PLAN")||eq(s,"INTERACTION"
 static int terminal(const char *s){return eq(s,"COMPLETED")||eq(s,"RESOLVED_NO_DEFECT");}
 static int hasproof(const kotze_event *e){return valid(e->evidence_ref,512);}
 
+/* A trusted verifier cannot complete a work item with unacknowledged effects.
+ * The outbox and action journal live in the SAME SQLite database.
+ * A reserved action that was never dispatched also blocks final completion.
+ */
+static int effects_settled(kotze_t *k, const char *work_id) {
+    sqlite3_stmt *s=NULL;
+    int rc=prepare(k,&s,
+        "SELECT EXISTS(SELECT 1 FROM actions WHERE work_id=? "
+        "AND operation IN ('WRITE','NETWORK') AND state='RESERVED') "
+        "OR EXISTS(SELECT 1 FROM effect_dispatch WHERE work_id=? AND state!='CONFIRMED')");
+    if(rc<0)return rc;
+    bind(s,1,work_id);bind(s,2,work_id);
+    int step=sqlite3_step(s);
+    if(step!=SQLITE_ROW) {
+        sqlite3_finalize(s);
+        return fail(k,KOTZE_ERROR,"Could not establish effect settlement");
+    }
+    int unresolved=sqlite3_column_int(s,0);
+    sqlite3_finalize(s);
+    return unresolved?KOTZE_DENIED:KOTZE_OK;
+}
+
 int kotze_apply_event(kotze_t *k,const kotze_event *e) {
     if(!k||!e||!valid(e->work_id,128)||!valid(e->event_id,128)||!valid(e->name,64)||
        (e->evidence_ref && strlen(e->evidence_ref)>512)||
@@ -213,6 +243,12 @@ int kotze_apply_event(kotze_t *k,const kotze_event *e) {
     if(e->contract_hash && e->contract_hash[0] && !eq(e->name,"ANSWER_ACCEPTED") && !eq(e->contract_hash,v.contract_hash))
         return commit(k,fail(k,KOTZE_CONFLICT,"Contract hash mismatch"));
     if(terminal(v.state))return commit(k,fail(k,KOTZE_DENIED,"Terminal work is immutable"));
+    if(eq(e->name,"VERIFY_PASS") || eq(e->name,"DELIVERY_CONFIRMED") ||
+       eq(e->name,"NO_DEFECT_PROVEN")) {
+        rc=effects_settled(k,e->work_id);
+        if(rc<0)return commit(k,rc==KOTZE_ERROR?rc:
+            fail(k,KOTZE_DENIED,"Unresolved external action blocks completion"));
+    }
 
     const char *next=NULL,*patch=v.patch_state,*verify=v.verification_state;
     const char *trajectory=v.trajectory_state,*effect=v.effect_state,*resume=v.resume_state;
@@ -388,12 +424,17 @@ int kotze_admit_action(kotze_t *k,const char *work_id,const char *action_id,
 int kotze_finish_action(kotze_t *k,const char *action_id,const char *outcome_digest){
     if(!k||!valid(action_id,128)||!valid(outcome_digest,128))return KOTZE_DENIED;
     if(begin(k)<0)return KOTZE_ERROR;
-    sqlite3_stmt *s=NULL;int rc=prepare(k,&s,"SELECT state,outcome_digest FROM actions WHERE action_id=?");if(rc<0)return commit(k,rc);
+    sqlite3_stmt *s=NULL;int rc=prepare(k,&s,"SELECT state,outcome_digest,operation FROM actions WHERE action_id=?");if(rc<0)return commit(k,rc);
     bind(s,1,action_id);int step=sqlite3_step(s);
     if(step!=SQLITE_ROW){sqlite3_finalize(s);return commit(k,fail(k,KOTZE_DENIED,"Unknown action"));}
     int reserved=eq((const char*)sqlite3_column_text(s,0),"RESERVED");
     int same=eq((const char*)sqlite3_column_text(s,0),"FINISHED")&&eq((const char*)sqlite3_column_text(s,1),outcome_digest);
-    sqlite3_finalize(s);if(!reserved)return commit(k,same?KOTZE_REPLAY:fail(k,KOTZE_CONFLICT,"Action already closed"));
+    int effectful=eq((const char*)sqlite3_column_text(s,2),"WRITE")||
+                  eq((const char*)sqlite3_column_text(s,2),"NETWORK");
+    sqlite3_finalize(s);
+    if(!reserved)return commit(k,same?KOTZE_REPLAY:fail(k,KOTZE_CONFLICT,"Action already closed"));
+    if(effectful)return commit(k,fail(k,KOTZE_DENIED,
+        "Effectful actions must finish through the durable dispatcher"));
     rc=prepare(k,&s,"UPDATE actions SET state='FINISHED',outcome_digest=? WHERE action_id=?");if(rc<0)return commit(k,rc);
     bind(s,1,outcome_digest);bind(s,2,action_id);return commit(k,done(k,s));
 }

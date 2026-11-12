@@ -1,4 +1,5 @@
 #include "kotze.h"
+#include "kotze_dispatch.h"
 #include <sqlite3.h>
 #include <assert.h>
 #include <stdio.h>
@@ -77,11 +78,26 @@ int main(void){
     check_state(k,"work-1","REPAIRING");
     OK(kotze_admit_action(k,"work-1","action-1","WRITE","write src/a.py","local-env",0));
     STATUS(kotze_admit_action(k,"work-1","action-2","WRITE","write src/a.py","local-env",0),KOTZE_REPEAT);
-    OK(kotze_finish_action(k,"action-1","result-ok"));
-    STATUS(kotze_finish_action(k,"action-1","result-ok"),KOTZE_REPLAY);
-    STATUS(kotze_finish_action(k,"action-1","result-fake"),KOTZE_CONFLICT);
+    STATUS(kotze_finish_action(k,"action-1","result-ok"),KOTZE_DENIED);
+    kotze_dispatch_t *d=NULL;
+    assert(kd_open(&d,filename)==KD_OK);
+    assert(kd_reserve(d,"action-1","effect-idempotency-1")==KD_OK);
+    int64_t token=0;
+    assert(kd_claim(d,"action-1",&token)==KD_OK && token==1);
+    assert(kd_unknown(d,"action-1",token)==KD_OK);
+    assert(kd_claim(d,"action-1",&token)==KD_DENIED);
 
     move(k,"work-1","e7","CANDIDATE_SEALED",KOTZE_CONTROLLER,"diff-receipt","candidate-01",NULL,NULL);
+    kotze_event premature=make_event(k,"work-1","premature","VERIFY_PASS",
+        KOTZE_VERIFIER,"unsupported","candidate-01","oracle-hash-1",NULL);
+    STATUS(kotze_apply_event(k,&premature),KOTZE_DENIED);
+    assert(kd_reconcile(d,"action-1","NOT_EXECUTED","absence-evidence")==KD_OK);
+    assert(kd_claim(d,"action-1",&token)==KD_OK && token==2);
+    assert(kd_finish(d,"action-1",token,"CONFIRMED","verified-dispatch-receipt")==KD_OK);
+    assert(kd_work_settled(d,"work-1")==KD_OK);
+    kd_close(d);
+    STATUS(kotze_finish_action(k,"action-1","verified-dispatch-receipt"),KOTZE_REPLAY);
+    STATUS(kotze_finish_action(k,"action-1","result-fake"),KOTZE_CONFLICT);
     check_state(k,"work-1","VERIFYING");
     kotze_event bad=make_event(k,"work-1","e8","VERIFY_PASS",KOTZE_WORKER,"self-declared","candidate-01","oracle-hash-1",NULL);
     STATUS(kotze_apply_event(k,&bad),KOTZE_DENIED);
