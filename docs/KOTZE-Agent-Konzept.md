@@ -5,7 +5,7 @@
 **Arbeitstitel:** KOTZE Agent  
 **Langform:** **K**ontext · **O**bject · **T**rajectory · **Z**ero-Trust · **E**vidence  
 **Produktkategorie:** Fully Autonomous Coding Agent / Autonomous Software Repair & Engineering Agent  
-**Version:** Konzept 1.2, 12. November 2026 (Trace-Repair, CausalMap und Continuous Improvement)  
+**Version:** Konzept 1.3, 12. November 2026 (bidirektionale Ursachenanalyse, Prämissenprüfung und Second Thought)  
 **Status:** Forschungs- und Architekturkonzept; **kein Implementierungs- oder Produktivnachweis**  
 **Leitmotiv:** *Wenig zusätzlicher Code, große nachweisbare Wirkung.*
 
@@ -550,6 +550,89 @@ Das Diagramm zeigt *illustrative* mögliche Äste und keine festgestellten Ursac
 **Akzeptanz:** Derselbe reproduzierte Fehler erscheint in Fishbone und Warum-Tree mit identischen IDs, Evidenz und Status. Eine widerlegte Ursache verschwindet nicht aus der Historie. Ein mehrfach wirksamer Ursachen-Knoten lässt sich in mehreren Zweigen darstellen, ohne ihn zu duplizieren. Crash/Restart erhält alle Belege, Graphrevisionen und Kanten. Keine Oberfläche oder Modellbewertung kann ein unbelegtes Ursachenlabel auf `VERIFIED` setzen.
 
 **Primärquellen:** ASQ, *Fishbone Diagram* (https://asq.org/quality-resources/fishbone), IHI, *Cause and Effect Diagram* (https://www.ihi.org/library/tools/cause-and-effect-diagram). Für die UI: React Flow, *Node-Based UIs in React* (https://reactflow.dev/), MIT-Lizenz. Die Quellen stützen die Visualisierungs- und Analysegrundidee, nicht eine bereits gemessene Erfolgsquote von KOTZE Agent.
+
+
+---
+
+### 6.11 Bidirectional Diagnostic Graph: vorwärts, rückwärts und Prämissenprüfung (BDG/1)
+
+**Architekturentscheidung:** Die Ursachen-Map ist ein persistierter, bidirektional durchsuchbarer **AND/OR/NOT-Evidenzgraph**. Sie ist zugleich Diagnosemodell, sichtbare Reparaturerklärung und Quelle für die spätere Verbesserung der Reparaturstrategie. Ein Fischgrätendiagramm stellt Ursachenfamilien dar; der aufklappbare Ursachenbaum ist eine Projektion des zugrunde liegenden Graphen. Jeder Ast hat einen reproduzierbaren Bezug zu einer Beobachtung oder zu einer ausdrücklich unbestätigten Annahme.
+
+#### 6.11.1 Die Ausgangsfrage ist selbst eine Hypothese
+
+Bevor Code verändert wird, prüft KOTZE **die Prämisse des eingegangenen Auftrags**:
+
+- **Normatives Soll:** Welches Verhalten ist durch eine nachvollziehbare Nutzeranforderung, API-Spezifikation, ein Design-/Layout-Artefakt, einen Testvertrag oder ein sonstiges autorisiertes Soll definiert?
+- **Beobachtetes Ist:** Was führt der exakt attestierte Repository-/Build-/Browserstand tatsächlich aus? Welcher Reproducer zeigt das?
+- **Abweichung:** Gibt es eine reproduzierbare, relevante Differenz zwischen Soll und Ist? Falls nicht: Handelt es sich möglicherweise um falsche Erwartungen, eine falsche Versionsannahme, eine nicht aktivierte Funktion, ein Deployment-/Cache-Problem oder einen Änderungswunsch statt um einen Defekt?
+- **Widerspruch:** Sind Sollquellen untereinander unvereinbar, darf keine davon stillschweigend durch eine Modellmeinung ersetzt werden.
+
+Normativer Premise-Status: \`PREMISE_SUPPORTED\`, \`PREMISE_CONTRADICTED\`, \`PREMISE_UNRESOLVED\`. Bei \`PREMISE_CONTRADICTED\` **keine Reparaturmutation**: die ursprüngliche Diagnoseannahme wird zurückgewiesen, der Konflikt mit Quellenbelegen gemeldet. Bei \`PREMISE_UNRESOLVED\` sind nur begrenzte read-only Prüfungen erlaubt, bis das Soll/der Fehler bestimmbar ist. Eine neue fachliche Anforderung wird als eigener autorisierter Change-Auftrag behandelt, nicht als heimlicher Bugfix. Voraussetzung für die Patch-Zulassung ist \`PREMISE_SUPPORTED\` mit einem eingefrorenen \`normative_contract_hash\` und einer nachgewiesenen Abweichung.
+
+#### 6.11.2 Vorwärts- und Rückwärtsanalyse als komplementäre Slices
+
+**Vorwärts (forward slicing / consequence projection):** Von einer konkreten fehlerauslösenden Eingabedifferenz, einem geänderten Zustand oder dem intendierten Patch aus alle **nachgewiesenen oder explizit als möglich markierten** Daten-/Kontrollfluss- und Folgeeffekte bestimmen. Fragen: *Welche Ausgabe kann dadurch beeinflusst werden? Welche Tests und Konsumenten sind betroffen? Was verschlimmert sich durch diese Änderung?*
+
+**Rückwärts (backward slicing / requirement regression):** Vom falschen Wert, fehlerhaften DOM-/CSS-Resultat, verletzten Assertion- oder Schnittstellenvertrag zurück zu den tatsächlich erforderlichen Abhängigkeiten, Bedingungen und Schreibstellen gehen. Fragen: *Welche vorgelagerten Bedingungen müssen gelten? Welche Pfade haben diesen Zustand nachweislich erzeugt? Welche Erklärung lässt sich durch eine gezielte Gegenprobe widerlegen?*
+
+Für instrumentierbare Programme bildet ein **failure-inducing chop** einen Kandidatenraum aus
+\`forward_slice(failure_inducing_input_delta) ∩ backward_slice(observed_bad_output)\`.
+Diese Schnittmenge ist ein Diagnosefilter, **kein Vollständigkeits- oder Kausalitätsbeweis**. Wenn sie leer ist, sind unter anderem unzureichende Instrumentierung, nicht erfasste Umwelteinflüsse, fehlende Aufrufe (omission faults), konkurrierende Schreibzugriffe oder eine falsche Ausgangsprämisse zu prüfen. **Keine automatische Entscheidung „kein Fehler“ und kein spekulatives Patchen aus leerer Schnittmenge.** Die Arbeit zu *failure-inducing chops* [R46] und eine empirische Studie von 457 Fehlern in C-Programmen [R47] stützen diesen kombinierten Diagnoseansatz.
+
+Der Graph kann deshalb \`AND\`-Knoten für gemeinsame Voraussetzungen, \`OR\` für konkurrierende Wege und \`NOT\` für widerlegte/ausgeschlossene Bedingungen repräsentieren [R48]. Ein realer Ausführungs-/Abhängigkeitsgraph darf Zyklen enthalten: die Traversierung muss Besuchsstatus, Kantenrevision, Tiefen- und Budgetgrenzen nutzen. Der Graph ist **keine unbegrenzt rekursive Aufforderung an ein LLM**.
+
+#### 6.11.3 Belegtes Ast-Pruning – keine Löschung des Erkenntnisgewinns
+
+Jede Hypothese besitzt \`hypothesis_id, parent_ids, scope, predicted_observation, falsifier, evidence_refs, observation_revision, status\` und mindestens eine konkrete Unterscheidungsfrage. Erlaubte Stati: \`OPEN\`, \`SUPPORTED\`, \`REFUTED\`, \`NOT_IN_EXECUTED_PATH\`, \`DEFERRED_UNKNOWN\`, \`PRUNED_FOR_THIS_REVISION\`.
+
+| Beobachtung | Folgerung | Behandlung |
+|---|---|---|
+| Eine vorher festgelegte Gegenprobe widerspricht der Vorhersage | Hypothese widerlegt (innerhalb des Probevertrags) | \`REFUTED\` und aus aktiver Suche abschneiden; Belege/Begründung behalten |
+| Nachweisbar außerhalb des tatsächlich relevanten Ausführungspfades | Nicht an diesem beobachteten Fehler beteiligt | \`NOT_IN_EXECUTED_PATH\` und für diese Revision abschneiden |
+| Belege fehlen, Probe unvollständig oder CSS-/DOM-Zustand nicht erfasst | Noch nicht entscheidbar | \`DEFERRED_UNKNOWN\`; **nicht** als falsch löschen |
+| Neue Revision, neue Eingaben oder belastbare Gegenevidenz | Frühere Entscheidung möglicherweise veraltet | Neuen Graph-Stand anlegen; früherer Ast bleibt historisch und kann **begründet** erneut geöffnet werden |
+| Identische Hypothese mit gleichem Kontext, gleichem Falsifier und gleicher Evidenz | Kein neuer Informationsgewinn | Wiederholung vor Modellaufruf sperren; auf diskriminierende Beobachtung oder Strategieänderung eskalieren |
+
+Pruning, Ausführung und Neupriorisierung erfolgen deterministisch und transaktional; es gibt keine konkurrierende Schreib-Race am Graphen. Parallele Hypothesengeber bekommen denselben unveränderlichen Snapshot und schreiben **nur Vorschläge**. Der C-Kern serialisiert Annahme, Knotenrevision und ggf. exklusive Patch-Lease. Für getrennte Patchkandidaten gelten getrennte Worktrees, eigene Basis-/Fencing-Tokens und ein compare-and-swap-gesteuerter Integrationsentscheid.
+
+#### 6.11.4 Bounded Second Thought – lokal, unabhängig, nicht autoritär
+
+**Ziel:** Vor vorschnellem lokalem Abschluss eine Entscheidung gezielt in zwei Richtungen angreifen, ohne eine zweite Reparaturorganisation zu erzeugen. Ein isolierter read-only Peer bekommt genau **einen** lokalen, noch veränderbaren \`DecisionCheckpoint\`:
+
+\`work_id, objective_hash, normative_contract_hash, candidate_hypothesis_id, proposed_action, actual_observations, evidence_refs, assumptions, uncertainties, affected_invariants, anticipated_effect, budget\`.
+
+Der Peer fragt: *Ist die Ausgangsprämisse gültig? Welche übersehene Abhängigkeit spricht gegen den Ast? Welche Folge hätte der geplante Fix für Konsumenten/Styles/Tests? Welche kleinste Beobachtung würde die Entscheidung ändern?* Ergebnis ist \`OK | LOOK_AGAIN | WARNING\`, dazu \`missing_consideration\`, \`consequence_chain\`, \`decisive_counter_test\`, \`reason\`. **Eine Konsultation pro aktiver Problemklasse und Entscheidungscheckpoint; keine Peer-Rekursion, keine Abstimmungsjury, keine Schreibrechte und kein eigener Erfolgsnachweis.**
+
+Der C-Kern entscheidet nach Policy/Beweisen über \`CONTINUE\`, \`RUN_COUNTER_TEST\`, \`RECOMPOSE\` oder \`BLOCK\`. Ein \`OK\` ersetzt niemals einen unabhängigen Verifier. Ein \`WARNING\` ersetzt niemals einen tatsächlich ausgeführten Gegenbeweis. Die Peer-Funktion wird nur bei begründeten Auslösern aktiviert: konkurrierende Ursachen mit hohem Fehlentscheidungsschaden, wiederholt falsifizierte Hypothesen, unsichere Anforderungen, weitreichende Patches oder bevor \`COMPLETED\` behauptet wird. Eine Ablation vergleicht **kein Peer**, **regelbasierte lokale Gegenprüfung** und **ein begrenzter unabhängiger Peer**, statt seinen Zusatznutzen vorauszusetzen.
+
+#### 6.11.5 Statistik, Wahrscheinlichkeiten und Learning ohne Scheingenauigkeit
+
+- **Sofort verfügbar:** SBFL/Ochiai sowie aus dem Graphen abgeleitete Relevanz- und Laufzeitpfadfilter ergeben ein **Ranking**, keine kalibrierte Wahrscheinlichkeit einer Ursache.
+- **Nur bei messbaren Likelihoods:** Ein explizites bayesianisches Modell darf \`P(H_i | E) ∝ P(E | H_i) · P(H_i)\` rechnen. Priors stammen ausschließlich aus vergleichbaren, unabhängig verifizierten Reparaturepisoden; korrelierte Beobachtungen dürfen nicht irrtümlich als unabhängig multipliziert werden. **Konkurrierende Ursachen müssen nicht gegenseitig exklusiv sein**; gemeinsame Ursachen und Mehrfachdefekte bleiben modellierbar.
+- **Kostenbewusste nächste Beobachtung:** Eine diskriminierende Probe wird gegenüber einem weiteren Modellurteil bevorzugt, wenn sie bei kontrolliertem Aufwand die relevante Unsicherheit stärker reduzieren kann. Der Auswahlwert wird als erwarteter Informationsgewinn pro Aufwand geführt; anfangs qualitative/regelbasierte Entscheidung, erst nach Kalibrierung numerisch.
+- **Langfristiges Lernen:** Für vergleichbare Fehlerklassen können einfache Bernoulli/Beta-Statistiken die **Erfolgswahrscheinlichkeit einer Reparaturstrategie pro Aufgabentyp** schätzen, **nicht** die Schuld einer einzelnen Codezeile. Als Erfolg zählt nur \`EXTERNALLY_VERIFIED\`; unbekannte Fälle bleiben zensiert und werden nicht als Erfolg oder Misserfolg umgedeutet. Übertragbarkeit und Zeitdrift werden mit festgehaltenen Held-out-Aufgaben geprüft; gelernte Regeln sind versioniert und reversibel.
+- **Anti-Degrading:** Die unveränderlichen Eingaben, der normative Vertrag, die Graphversion, die Falsifikationshistorie und Beleg-Hashes sind **außerhalb** jedes LLM-Kontextfensters persistent. Kompakte Prompts sind Projektionen dieser Wahrheit, nicht ihr Ersatz. Nach jedem Kontextwechsel wird der entscheidungsrelevante Zustand neu kompiliert. Wiederholungs- und Widerspruchssperren arbeiten vor dem nächsten Modellaufruf.
+
+#### 6.11.6 DOM/CSS als konkreter bidirektionaler Diagnosefall
+
+Bei visuellen Fehlern beginnt die Diagnose **nicht** mit einem neuen CSS-Selektor. Ein Browseradapter erfasst \`DOM-Element/Selektor, CSSOM-Regelherkunft, tatsächlich angewendete Deklaration, computed style, Box-Modell, beteiligte Vorfahren, Medien-/Containerbedingungen, Stylesheet-/Build-Identität, Viewport\` und den beobachteten Screenshot. Rückwärts wird von der falschen Geometrie oder Eigenschaft zur **gewinnenden** Deklaration, deren Kaskadenreihenfolge und den beeinflussenden Vorfahren navigiert. Vorwärts wird ermittelt, welche anderen DOM-Elemente und Breakpoints eine geplante Änderung ebenfalls beeinflussen kann.
+
+Nicht geladene Stylesheets, Cache-/Version-Mismatches, \`!important\`, Inline-Stile, Spezifität, Vererbung, Layout-Kontext, Custom Properties und \`@media\`/\`@container\` sind **prüfbare Erklärungen**, keine automatischen Schuldannahmen. Der ursprüngliche Anforderungs-/Screenshot-/Viewport-Vertrag bleibt maßgeblich. Jede Änderung muss am exakt reproduzierten Element, Viewport und geladenen Build erneut geprüft werden. Der C11-Kern verwaltet Graph, Leases und Evidenz; DOM/CSS-Messungen gehören in einen Browseradapter, **nicht** in einen zweiten C-Webbrowser.
+
+#### 6.11.7 Normative Kopplung und Akzeptanz
+
+| Eingang | Vorbedingung | Atomare Wirkung | Verbotener Folgeeffekt |
+|---|---|---|---|
+| \`PREMISE_CHECK\` | Versionierter Soll-/Ist-/Quellvertrag | \`premise_state\` und Beleg-Hash speichern | Kein Patch bei \`CONTRADICTED\` oder \`UNRESOLVED\` |
+| \`HYPOTHESIS_PROPOSED\` | Gleicher Base-/Graph-Snapshot, Vorhersage und Falsifier vorhanden | Vorschlag normalisieren, deduplizieren, Hypothesen-ID anlegen | Keine gleichzeitigen Mutationen durch Hypothesengeber |
+| \`HYPOTHESIS_FALSIFIED\` | Kanonische Probe, passende Revision und Prüforakel | Ast \`REFUTED\`, Historie behalten, Kandidaten neu priorisieren | Kein erneuter identischer Versuch ohne neue Evidenz |
+| \`SECOND_THOUGHT_FINDING\` | Ein aktiver lokaler Checkpoint, Budget, read-only Peer | Advice und entscheidenden Gegentest protokollieren | Weder automatischer Patch noch Wahrheitspromotion |
+| \`PATCH_ADMIT\` | \`PREMISE_SUPPORTED\`, geschützter Oracle-Hash, glaubwürdige Ursache, Lease | Kandidaten- und Fencing-Identität binden | Kein paralleler Schreiber derselben Arbeitskopie |
+| \`CANDIDATE_CHANGED\` | Geänderte Kandidatenrevision | Relevante Verifikation \`STALE\` setzen | Kein \`COMPLETED\` auf altem PASS |
+
+**Akzeptanzfälle ohne Modellaufruf:** (1) falsche Ausgangsprämisse verhindert Patch; (2) widerlegter Ast verschwindet aus aktiver Map, bleibt historisch; (3) zwei gleichzeitig eintreffende Hypothesen können keine zwei Writer-Leases erzeugen; (4) Forward-/Backward-Schnittmenge leer führt zu \`UNKNOWN\`, nicht zu \`NO_BUG\`; (5) ein voreiliges Peer-\`OK\` führt ohne Prüforakel nicht zu \`COMPLETED\`; (6) ein Kontextreset lädt alte Widerlegungen und stoppt identische Reparaturversuche; (7) CSS-Reproduktion bindet DOM-Knoten, computed property und Viewport an die Verifikation.
+
+**Forschungsnachweise und Abgrenzung:** *Failure-Inducing Chops* [R46] liefert die Vorwärts/Rückwärts-Schnittmenge. *Locating Faults with Program Slicing: An Empirical Analysis* [R47] zeigt den empirischen Nutzen von Ranking plus dynamischem Slicing bei C-Fehlern. *AND/OR/NOT Causal Graphs* [R48] liefert eine Diagnosemodellierung. *Using Likely Invariants* [R49] ergänzt invariantengestützte Kandidatenreduktion. Der Bounded-Second-Thought-Vertrag ist eine **zu evaluierende Architekturentscheidung**, kein durch diese Publikationen bereits erwiesener KOTZE-Leistungsvorteil.
 
 
 ---
@@ -1348,6 +1431,12 @@ Pro Fehlerklasse werden `recurrence_rate`, `time_to_first_caused_condition`, `re
 | **R43** | Huang et al., *TraceCoder: A Trace-Driven Multi-Agent Framework for Automated Debugging of LLM-Generated Code*, [arXiv:2602.06875](https://arxiv.org/abs/2602.06875), [DOI:10.1145/3744916.3773187](https://doi.org/10.1145/3744916.3773187), [GitHub](https://github.com/CSMA-Research-Group/TraceCoder) | ICSE 2026 Conference | Laufzeitinstrumentierung, Historical Lesson Learning und Rollback; bis 34,43 % relative Verbesserung im geprüften Setup: **Abstract**, keine Transfergarantie |
 | **R44** | American Society for Quality, [Fishbone Diagram](https://asq.org/quality-resources/fishbone) | Primärdokumentation Qualitätsmanagement | Hypothesenstrukturierung und Ursache-Wirkung-Darstellung, **Overview**; kein Software-Reparaturbenchmark |
 | **R45** | Toyota Motor Corporation, [Toyota Production System](https://global.toyota/en/company/vision-and-philosophy/production-system/); [Toyota Quality](https://www.toyota-europe.com/about-us/toyota-quality) | Primärquellen Unternehmens-/Prozessmethodik | Jidoka, Kaizen und 5 Whys, **Produktionssystem-/Qualitätsabschnitte**; kein Coding-Agent-Erfolgsnachweis |
+
+
+| **R46** | Cleve/Al-Zawawi/Zeller, *Locating Faulty Code Using Failure-Inducing Chops*, [DOI:10.1145/1101908.1101948](https://doi.org/10.1145/1101908.1101948) | ASE 2005, referierte Konferenzpublikation | Vorwärts-/Rückwärts-Slicing und Schnittmenge; Beispiel 2–4 Statements: **Abstract**, keine allgemeine Leistungsprognose |
+| **R47** | Soremekun/Kirschner/Böhme/Zeller, *Locating Faults with Program Slicing: An Empirical Analysis*, [DOI:10.1007/s10664-020-09931-7](https://doi.org/10.1007/s10664-020-09931-7) | *Empirical Software Engineering* 26 (2021), begutachtete Zeitschrift, Artikel 51 | 457 Defekte/46 C-Programme; Kombination top-5 SBFL + Slice untersucht durchschnittlich 15 % / 30 Zeilen; **Abstract** |
+| **R48** | Ligęza/Fuster Parra, *And/or/not Causal Graphs – A Model for Diagnostic Reasoning*, [Journal](https://www.amcs.uz.zgora.pl/?action=paper&paper=1107) | *International Journal of Applied Mathematics and Computer Science*, 1997, Journalpublikation | Abduktiver AND/OR/NOT-Diagnosegraph; keine im Konzept zitierte Effektzahl |
+| **R49** | Sahoo/Criswell/Geigle/Adve, *Using Likely Invariants for Automated Software Fault Localization*, [DOI:10.1145/2499368.2451131](https://doi.org/10.1145/2499368.2451131) | ASPLOS 2013, referierte Konferenzpublikation | Invariantenselektion + rückwärtsgerichtetes dynamisches Slicing; 5–17 Kandidatenausdrücke in der untersuchten Serverstudie: **Abstract** |
 
 **Quellenhygiene:** Nicht belegte bzw. nicht verwendete Altkennungen `R15`, `R22`, `R28`, `R30` werden nicht mehr als wissenschaftliche Beweise geführt. Die früheren internen `Pxx`-Kennungen sind **keine öffentlichen Quellen** und werden aus diesem öffentlichen Dokument entfernt. Sie können intern in einem separaten, nicht veröffentlichten Herkunfts-/Paritätsregister verwaltet werden. Diese öffentliche Fassung nennt stattdessen reproduzierbare Verfahren, technische Verträge und öffentliche Primärquellen.
 
