@@ -278,7 +278,8 @@ kotze-agent/
   src/
     core/                   # Zustandsmaschinen, Übergangs- und Gate-Logik
     store/                  # SQLite, Ereignisse, atomare Writes, Migrations
-    repair/                 # Integrierte SPARI-Mechanismen
+    repair/                 # Evidenzbasierte Diagnose und Reparaturregeln
+    diagnosis/              # CausalMap: Ursachen-Graph, Evidenz und Hypothesen
     assurance/              # Integrierte AppleMe-Mechanismen
     runtime/                # Worker-/Prozessüberwachung, Budget, Lease
     verify/                 # Verifikationsfreigabe und Ergebnisbewertung
@@ -461,6 +462,58 @@ I-12  CRITICAL_ACTION_NOT_AUTHORIZED    -> NO_EFFECT
 ```
 
 Diese Invarianten sind **ausführbare Anforderungen**: Jeder Eintrag erhält deterministische Unit-Tests, Crash-Tests und adversarielle Gegenbeispiele. Sie werden nicht nur als Prompt-Anweisungen formuliert.
+
+---
+
+### 6.9 CausalMap – navigierbare Ishikawa- und Ursachenbaum-Ansicht
+
+**Modulname:** `CausalMap` (Root Cause Intelligence), intern `src/diagnosis/cause_map.c` und `include/kotze_cause_map.h`. **Eigentümer:** die Diagnose-Engine. Die spätere kontinuierliche Verbesserung verwendet dieselben Ursachendaten, betreibt aber keinen zweiten Graph-Store.
+
+**Entscheidung:** Das klassische Ishikawa-/Fischgrätendiagramm ist nur eine *Ansicht*. Die kanonischen Daten sind ein persistierter, versionierter gerichteter Ursachengraph. Das vermeidet die falsche Annahme, dass jede Ursache nur einen einzigen Elternknoten oder jeder Fehler genau eine Grundursache besitzt. Kausalitätskanten können mehrere Wirkungen, gemeinsame Voraussetzungen und alternative Erklärungen ausdrücken. Die Visualisierung bietet drei Projektionen desselben Datensatzes: Fischgräte (Kategorien), aufklappbarer Warum-Baum (5 Whys) und Evidenzgraph (Querverbindungen).
+
+**Kategorien für Softwarefehler** werden aus dem beobachteten Fehler abgeleitet und können angepasst werden: Code/Algorithmik, Daten/Zustand, APIs/Abhängigkeiten, Laufzeit/Umgebung, Tests/Verifikation, Entwicklungsprozess/Agentensteuerung. Diese Kategorien dienen der Hypothesenvollständigkeit; sie sind **keine Behauptung**, dass jede Kategorie an einem konkreten Fehler beteiligt ist.
+
+```mermaid
+flowchart RL
+    E["Beobachteter Fehler"] --> C["Code / Algorithmik"]
+    E --> D["Daten / Zustand"]
+    E --> I["APIs / Abhängigkeiten"]
+    E --> R["Laufzeit / Umgebung"]
+    E --> T["Tests / Verifikation"]
+    E --> P["Prozess / Agentensteuerung"]
+    C --> C1["Hypothese: falscher Grenzfall"]
+    C1 --> C2["Warum? Vorbedingung ungeprüft"]
+    D --> D1["Hypothese: veralteter Zustand"]
+    I --> I1["Hypothese: inkompatibles Interface"]
+    R --> R1["Hypothese: Umgebungsabweichung"]
+    T --> T1["Hypothese: schwaches Test-Orakel"]
+    P --> P1["Hypothese: fehlerhafter Handoff"]
+```
+
+Das Diagramm zeigt *illustrative* mögliche Äste und keine festgestellten Ursachen. Sichtbar werden bei jeder aufklappbaren Ursache: Status, Beobachtung, ausführbare Falsifikationsprobe, betroffene Revision, verursachende und widerlegende Evidenz, wahrscheinliche Wirkung sowie offene Alternativen. „Kausal“ ist eine **Hypothese**, bis Experimente und unabhängige Nachweise ihre Unterstützung liefern. Eine Korrelation aus Coverage ist kein Beweis einer Kausalbeziehung.
+
+| Graph-Element | Pflichtfelder | Bedeutung |
+|---|---|---|
+| `cause_node` | `node_id, work_id, kind, label, status, revision` | Fehlersymptom, Kategorie, Hypothese, Zwischenursache oder bestätigte Bedingung |
+| `cause_edge` | `edge_id, work_id, source_id, target_id, relation, status, revision` | `MAY_CAUSE`, `REQUIRES`, `CONTRADICTS`, `EXPLAINS`; gerichtet, kein Zwang zum Tree |
+| `cause_evidence` | `node_id, evidence_id, polarity, provenance, base_sha, artifact_hash` | `SUPPORTS`/`REFUTES`; Artefakte revisions- und quellgebunden |
+| `cause_probe` | `probe_id, node_id, prediction, reproducer_hash, result, attempt_id` | Vorhersage und falsifizierender Lauf; protokolliert mit Ergebnis |
+| `cause_snapshot` | `work_id, graph_revision, snapshot_hash, created_at` | Deterministische Ansicht und wiederholbare Rekonstruktion |
+
+**Verhalten und Zustandskopplung:**
+1. Ein reproduzierter Fehler erzeugt genau einen versionierten Symptomknoten pro `work_id`/Fehlersignatur; Kategorien und Hypothesen entstehen bei Bedarf.
+2. Die Diagnose-FSM legt bei `HYPOTHESIS_OPEN` einen Hypothesenknoten und eine prüfbare Vorhersage an; der Kernel verlangt eine konkrete Gegenprobe, bevor ein riskanter Patch autorisiert wird.
+3. Externe Test-/Trace-Ereignisse hängen Evidence-Referenzen an den passenden Knoten. `HYPOTHESIS_REFUTED` markiert den Knoten widerlegt, ohne seine Historie zu löschen; `ROOT_CAUSE_SUPPORTED` markiert einen Knoten *gestützt*, nicht mathematisch bewiesen.
+4. Der Fehlerlokalisierungs-Score (z. B. Ochiai) darf nur als **Rankinghinweis** angezeigt werden, niemals als `P(Fehlerursache)`. Für kalibrierte Posterior-Wahrscheinlichkeiten wären dokumentiertes Wahrscheinlichkeitsmodell, Priors und externe Kalibrierung nötig.
+5. Bei `PATCH_CANDIDATE` wird die Kandidatenrevision mit den adressierten Ursachen verknüpft. Nur ein eingefrorener Original-Reproducer plus unabhängige Folgeprüfung kann das Wirkungsergebnis `REPAIRED_VERIFIED` auslösen.
+6. Veränderte Evidenz, ein abweichender Runtime-Pfad oder ein neuer Gegenbeweis führen zu einer neuen Graphrevision und gegebenenfalls `RECOMPOSE`; alte Kanten bleiben historisch, aber gelten nicht stillschweigend als aktuell.
+7. Nach einer erfolgreichen Reparatur untersucht die kontinuierliche Verbesserung wiederkehrende *Ursachenklassen* quer über Aufträge und schlägt präventive Kontrollen vor. Diese werden gegen Held-out-Fälle evaluiert, bevor sie zur Standardregel werden.
+
+**Oberfläche:** Der C-Kern liefert einen read-only Graph-Snapshot in einem versionierten JSON-Protokoll. Ein optionaler Web-View kann dafür `@xyflow/react` (MIT; Drag/Pan/Zoom/expandierbare Nodes) verwenden; Layout und Interaktion liegen nicht im C-Kernel. Die Fishbone-Ansicht ist eine feste Projektion des Graphen, kein unabhängiger Datenspeicher. Alternativansichten benutzen dieselben `node_id` und `edge_id`.
+
+**Akzeptanz:** Derselbe reproduzierte Fehler erscheint in Fishbone und Warum-Tree mit identischen IDs, Evidenz und Status. Eine widerlegte Ursache verschwindet nicht aus der Historie. Ein mehrfach wirksamer Ursachen-Knoten lässt sich in mehreren Zweigen darstellen, ohne ihn zu duplizieren. Crash/Restart erhält alle Belege, Graphrevisionen und Kanten. Keine Oberfläche oder Modellbewertung kann ein unbelegtes Ursachenlabel auf `VERIFIED` setzen.
+
+**Primärquellen:** ASQ, *Fishbone Diagram* (https://asq.org/quality-resources/fishbone), IHI, *Cause and Effect Diagram* (https://www.ihi.org/library/tools/cause-and-effect-diagram). Für die UI: React Flow, *Node-Based UIs in React* (https://reactflow.dev/), MIT-Lizenz. Die Quellen stützen die Visualisierungs- und Analysegrundidee, nicht eine bereits gemessene Erfolgsquote von KOTZE Agent.
 
 ---
 
