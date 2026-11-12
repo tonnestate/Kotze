@@ -138,4 +138,34 @@ int kotze_get_repair_stats(kotze_t *k, const char *capability_key,
                            const char *failure_class, const char *strategy_key,
                            kotze_repair_stats *out);
 
+
+/* Read-only, conservative Repair Pair strategy ADVICE. This is never an
+ * action authorization, a trained probability or an independent verifier.
+ * The caller must re-check the work revision before admitting any action.
+ */
+typedef enum {
+    KOTZE_REPAIR_ABSTAIN = 0,
+    KOTZE_REPAIR_ADVISE = 1,
+    KOTZE_REPAIR_BUDGET_HALT = 2
+} kotze_repair_choice;
+
+typedef struct {
+    kotze_repair_choice choice;
+    char strategy_key[129];
+    int64_t work_revision;
+    int remaining_actions;
+    uint64_t distinct_work_pass;
+    uint64_t distinct_work_fail;
+} kotze_repair_advice;
+
+/* Computes advisory candidates only in DIAGNOSING/PLANNING; requires an
+ * exact caller-expected work revision, remaining budget, matching cohort,
+ * >=6 distinct work IDs and >=75% verifier-REPORTED pass cases.
+ * Repeated attempts for one work count once; any fail takes precedence.
+ */
+int kotze_suggest_repair(kotze_t *k, const char *work_id,
+                         int64_t expected_revision, const char *capability_key,
+                         const char *environment_digest, const char *context_digest,
+                         const char *failure_class, kotze_repair_advice *out);
+
 #endif

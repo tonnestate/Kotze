@@ -105,6 +105,12 @@ int main(void){
         "context-v1","CONSTRAINT_VIOLATION","minimal-formula-repair","e8"};
     OK(kotze_record_repair_episode(k,&ep_pass));
     STATUS(kotze_record_repair_episode(k,&ep_pass),KOTZE_REPLAY);
+    OK(kotze_suggest_repair(k,"advise-work",advise_view.revision,
+        "geometry-fix","environment-v1","context-geo",
+        "CONSTRAINT_VIOLATION",&advice));
+    assert(advice.choice==KOTZE_REPAIR_ADVISE);
+    assert(advice.distinct_work_pass==6);
+
     kotze_repair_episode ep_wrong=ep_pass;ep_wrong.strategy_key="rewrite-all";
     STATUS(kotze_record_repair_episode(k,&ep_wrong),KOTZE_CONFLICT);
     ep_wrong=ep_pass;ep_wrong.episode_id="ep-duplicate";
@@ -134,6 +140,88 @@ int main(void){
     OK(kotze_get_repair_stats(k,"unit-calculation","environment-v2","context-v1",
         "CONSTRAINT_VIOLATION","minimal-formula-repair",&stats));
     assert(stats.verifier_reported_pass==0 && stats.verifier_reported_fail==0);
+
+
+    /* Conservative read-only strategy advice. Six distinct work IDs are
+     * needed. Same-work repeated episodes cannot make the cohort large.
+     * This remains verifier-REPORTED evidence, not authenticated proofs.
+     */
+    kotze_work_spec advise=spec("advise-work","AUTO",0,2);
+    OK(kotze_create_work(k,&advise));
+    kotze_work_view advise_view;
+    OK(kotze_get_work(k,"advise-work",&advise_view));
+    kotze_repair_advice advice={0};
+    STATUS(kotze_suggest_repair(k,"advise-work",advise_view.revision,
+        "unit-calculation","environment-v1","context-v1",
+        "CONSTRAINT_VIOLATION",&advice),KOTZE_DENIED);
+    move(k,"advise-work","ad-1","CONTRACT_VALID",KOTZE_CONTROLLER,
+         "contract",NULL,NULL,NULL);
+    move(k,"advise-work","ad-2","BUG_REPRODUCED",KOTZE_VERIFIER,
+         "baseline",NULL,"oracle-advice",NULL);
+    OK(kotze_get_work(k,"advise-work",&advise_view));
+    STATUS(kotze_suggest_repair(k,"advise-work",0,
+        "unit-calculation","environment-v1","context-v1",
+        "CONSTRAINT_VIOLATION",&advice),KOTZE_CONFLICT);
+    OK(kotze_suggest_repair(k,"advise-work",advise_view.revision,
+        "unit-calculation","environment-v1","context-v1",
+        "CONSTRAINT_VIOLATION",&advice));
+    assert(advice.choice==KOTZE_REPAIR_ABSTAIN);
+    assert(advice.remaining_actions==2);
+
+    for(int idx=0;idx<6;idx++) {
+        char wid[32],ev[32],epid[32],candidate[32];
+        snprintf(wid,sizeof(wid),"cohort-%d",idx);
+        snprintf(candidate,sizeof(candidate),"candidate-%d",idx);
+        kotze_work_spec sample=spec(wid,"AUTO",0,2);
+        OK(kotze_create_work(k,&sample));
+        snprintf(ev,sizeof(ev),"cohort-%d-1",idx);
+        move(k,wid,ev,"CONTRACT_VALID",KOTZE_CONTROLLER,"contract",NULL,NULL,NULL);
+        snprintf(ev,sizeof(ev),"cohort-%d-2",idx);
+        move(k,wid,ev,"BUG_REPRODUCED",KOTZE_VERIFIER,"baseline",NULL,"oracle-cohort",NULL);
+        snprintf(ev,sizeof(ev),"cohort-%d-3",idx);
+        move(k,wid,ev,"CAUSE_SUPPORTED",KOTZE_CONTROLLER,"diagnosis",NULL,NULL,NULL);
+        snprintf(ev,sizeof(ev),"cohort-%d-4",idx);
+        move(k,wid,ev,"PLAN_AUTHORIZED",KOTZE_CONTROLLER,"plan",NULL,NULL,NULL);
+        snprintf(ev,sizeof(ev),"cohort-%d-5",idx);
+        move(k,wid,ev,"CANDIDATE_SEALED",KOTZE_CONTROLLER,"candidate",candidate,NULL,NULL);
+        snprintf(ev,sizeof(ev),"cohort-%d-6",idx);
+        move(k,wid,ev,"VERIFY_PASS",KOTZE_VERIFIER,"verifier",candidate,"oracle-cohort",NULL);
+        snprintf(epid,sizeof(epid),"cohort-ep-%d",idx);
+        kotze_repair_episode sample_episode={
+            epid,wid,"geometry-fix","environment-v1","context-geo",
+            "CONSTRAINT_VIOLATION","minimal-geometric-repair",ev};
+        OK(kotze_record_repair_episode(k,&sample_episode));
+    }
+    OK(kotze_suggest_repair(k,"advise-work",advise_view.revision,
+        "geometry-fix","environment-v1","context-geo",
+        "CONSTRAINT_VIOLATION",&advice));
+    assert(advice.choice==KOTZE_REPAIR_ADVISE);
+    assert(strcmp(advice.strategy_key,"minimal-geometric-repair")==0);
+    assert(advice.distinct_work_pass==6 && advice.distinct_work_fail==0);
+    assert(advice.work_revision==advise_view.revision);
+    OK(kotze_suggest_repair(k,"advise-work",advise_view.revision,
+        "geometry-fix","environment-v2","context-geo",
+        "CONSTRAINT_VIOLATION",&advice));
+    assert(advice.choice==KOTZE_REPAIR_ABSTAIN);
+    assert(advice.strategy_key[0]=='\\0');
+    OK(kotze_suggest_repair(k,"advise-work",advise_view.revision,
+        "geometry-fix","environment-v1","context-geo",
+        "MATH_UNGROUNDED",&advice));
+    assert(advice.choice==KOTZE_REPAIR_ABSTAIN);
+
+    kotze_work_spec halt=spec("advice-budget-halt","AUTO",0,0);
+    OK(kotze_create_work(k,&halt));
+    move(k,"advice-budget-halt","halt-1","CONTRACT_VALID",KOTZE_CONTROLLER,
+         "contract",NULL,NULL,NULL);
+    move(k,"advice-budget-halt","halt-2","BUG_REPRODUCED",KOTZE_VERIFIER,
+         "baseline",NULL,"oracle-halt",NULL);
+    kotze_work_view halt_view;
+    OK(kotze_get_work(k,"advice-budget-halt",&halt_view));
+    OK(kotze_suggest_repair(k,"advice-budget-halt",halt_view.revision,
+        "geometry-fix","environment-v1","context-geo",
+        "CONSTRAINT_VIOLATION",&advice));
+    assert(advice.choice==KOTZE_REPAIR_BUDGET_HALT);
+    assert(advice.remaining_actions==0);
 
     kotze_work_spec nod=spec("no-defect","AUTO",0,1);OK(kotze_create_work(k,&nod));
     move(k,"no-defect","n1","CONTRACT_VALID",KOTZE_CONTROLLER,"domain-valid",NULL,NULL,NULL);

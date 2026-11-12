@@ -56,6 +56,16 @@ The `repair_episodes` SQLite table is additive, using the existing native transa
 
 **Test status:** source-level test cases were added for valid pass/fail binding, replay, tamper attempts, duplicate proof-event counting, exact cohort isolation and reopen persistence. No compiler, tests, hosted CI, model requests or benchmark runs were executed when adding this slice.
 
+## Conservative Repair Pair strategy adviser (implemented slice)
+
+The `kotze_suggest_repair` API is a **read-only, abstention-first strategy adviser**, not an autonomous repair loop. It uses one SQLite read snapshot to bind the current work revision and a context-exact repair-memory query. It operates only in `DIAGNOSING` or `PLANNING`; a stale revision causes `KOTZE_CONFLICT`, unavailable state causes `KOTZE_DENIED`, and an exhausted action budget returns `KOTZE_REPAIR_BUDGET_HALT`.
+
+For a strategy to be suggested, it must have at least **six distinct work identities** matching capability, environment digest, context digest and failure class, with at least **75% verifier-reported passes**. This threshold is a conservative operational heuristic, **not a calibrated probability, statistical confidence interval or proof of superiority**. Multiple episodes for one work identity are collapsed; if any of them failed, that work counts as a failure for that strategy. Equal cohorts are ordered deterministically. With sparse, mismatched or negative evidence the adviser returns `KOTZE_REPAIR_ABSTAIN`; it never invents a new strategy.
+
+**Safety:** A strategy string is only a suggestion. It cannot execute actions, mutate contracts, change permissions, write files, promote success or bypass `kotze_admit_action`. Any subsequent tool action must be admitted separately, with a fresh authoritative work-state check. Existing `KOTZE_VERIFIER` role tags remain unauthenticated: no independent zero-trust proof is claimed.
+
+**Verification status:** C source and regression cases have been added but **no compiler, tests, CI, benchmark or model calls were run** for this change. External verifier isolation and the real repair-worker execution bridge remain open.
+
 ## Missing items — explicit next engineering boundary
 
 This is not yet a full implementation of the research paper. The following are intentionally *not* claimed:

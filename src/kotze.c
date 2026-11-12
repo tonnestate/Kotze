@@ -569,3 +569,68 @@ int kotze_get_repair_stats(kotze_t *k, const char *capability_key,
     sqlite3_finalize(s);
     return fail(k,KOTZE_ERROR,sqlite3_errmsg(k->db));
 }
+
+
+/* Advisory-only Repair Pair query. Host permissions, engineering oracles and
+ * the existing action admission gate remain authoritative. A read transaction
+ * ties the revision check and aggregated evidence to one SQLite snapshot.
+ */
+int kotze_suggest_repair(kotze_t *k, const char *work_id,
+                         int64_t expected_revision, const char *capability_key,
+                         const char *environment_digest, const char *context_digest,
+                         const char *failure_class, kotze_repair_advice *out) {
+    if (!k || !out || !valid(work_id,128) || expected_revision<0 ||
+        !valid(capability_key,128) || !valid(environment_digest,128) ||
+        !valid(context_digest,128) || !repair_failure_class_valid(failure_class))
+        return KOTZE_DENIED;
+    memset(out,0,sizeof(*out));
+    out->choice=KOTZE_REPAIR_ABSTAIN;
+    if (sql(k,"BEGIN")<0) return KOTZE_ERROR;
+    kotze_work_view v;
+    int rc=load(k,work_id,&v);
+    if(rc<0)return commit(k,rc);
+    if(v.revision!=expected_revision)
+        return commit(k,fail(k,KOTZE_CONFLICT,"Stale repair-advice work revision"));
+    if((!eq(v.state,"DIAGNOSING")&&!eq(v.state,"PLANNING")) ||
+       eq(v.trajectory_state,"DISCHARGED") || eq(v.effect_state,"UNKNOWN"))
+        return commit(k,fail(k,KOTZE_DENIED,"Repair advice not permitted in this work state"));
+    out->work_revision=v.revision;
+    out->remaining_actions=v.action_budget-v.actions_reserved;
+    if(out->remaining_actions<=0) {
+        out->choice=KOTZE_REPAIR_BUDGET_HALT;
+        return commit(k,KOTZE_OK);
+    }
+
+    sqlite3_stmt *s=NULL;
+    rc=prepare(k,&s,
+        "WITH per_work AS ("
+        " SELECT strategy_key,work_id,"
+        " MAX(CASE WHEN verdict='FAIL' THEN 1 ELSE 0 END) AS any_fail,"
+        " MAX(CASE WHEN verdict='PASS' THEN 1 ELSE 0 END) AS any_pass"
+        " FROM repair_episodes WHERE capability_key=? AND environment_digest=?"
+        " AND context_digest=? AND failure_class=?"
+        " GROUP BY strategy_key,work_id"
+        "), cohorts AS ("
+        " SELECT strategy_key,"
+        " SUM(CASE WHEN any_fail=0 AND any_pass=1 THEN 1 ELSE 0 END) AS passes,"
+        " SUM(CASE WHEN any_fail=1 THEN 1 ELSE 0 END) AS fails"
+        " FROM per_work GROUP BY strategy_key"
+        ") SELECT strategy_key,passes,fails FROM cohorts"
+        " WHERE (passes+fails)>=6 AND 1.0*passes/(passes+fails)>=0.75"
+        " ORDER BY 1.0*passes/(passes+fails) DESC, passes DESC,"
+        " fails ASC, strategy_key COLLATE BINARY ASC LIMIT 1");
+    if(rc<0)return commit(k,rc);
+    bind(s,1,capability_key);bind(s,2,environment_digest);
+    bind(s,3,context_digest);bind(s,4,failure_class);
+    int step=sqlite3_step(s);
+    if(step==SQLITE_ROW) {
+        cp(out->strategy_key,sizeof(out->strategy_key),sqlite3_column_text(s,0));
+        out->distinct_work_pass=(uint64_t)sqlite3_column_int64(s,1);
+        out->distinct_work_fail=(uint64_t)sqlite3_column_int64(s,2);
+        out->choice=KOTZE_REPAIR_ADVISE;
+    }
+    sqlite3_finalize(s);
+    if(step!=SQLITE_ROW && step!=SQLITE_DONE)
+        return commit(k,fail(k,KOTZE_ERROR,sqlite3_errmsg(k->db)));
+    return commit(k,KOTZE_OK);
+}

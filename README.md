@@ -12,6 +12,10 @@ The C11 core now has a transactional, **verifier-event-bound repair-episode ledg
 
 See [the Second Brain design](docs/STATISTICAL-SECOND-BRAIN-AND-REPAIR-PAIR.md) and [core implementation notes](docs/CORE_PHASE1.md).
 
+## Repair strategy guidance (first read-only coordinator)
+
+`kotze_suggest_repair` can now query the recorded repair outcomes and return an advisory strategy only for a revision-matched, nonblocked diagnosis/planning state with remaining action budget. It abstains on insufficient or mismatched evidence (at least six distinct prior work IDs and a 75% verifier-reported success share are required). The ranking uses no model calls, does not execute repairs and never authorizes tool use. It is **not a trusted statistical guarantee or an operational Repair Pair**; the independent verifier/worker bridge remains missing.
+
 ## Local build (no GitHub Actions / hosted runners)
 
 Requirements: C11 compiler, SQLite3 development library, `make`.
