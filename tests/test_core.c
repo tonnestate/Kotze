@@ -105,11 +105,6 @@ int main(void){
         "context-v1","CONSTRAINT_VIOLATION","minimal-formula-repair","e8"};
     OK(kotze_record_repair_episode(k,&ep_pass));
     STATUS(kotze_record_repair_episode(k,&ep_pass),KOTZE_REPLAY);
-    OK(kotze_suggest_repair(k,"advise-work",advise_view.revision,
-        "geometry-fix","environment-v1","context-geo",
-        "CONSTRAINT_VIOLATION",&advice));
-    assert(advice.choice==KOTZE_REPAIR_ADVISE);
-    assert(advice.distinct_work_pass==6);
 
     kotze_repair_episode ep_wrong=ep_pass;ep_wrong.strategy_key="rewrite-all";
     STATUS(kotze_record_repair_episode(k,&ep_wrong),KOTZE_CONFLICT);
@@ -203,7 +198,7 @@ int main(void){
         "geometry-fix","environment-v2","context-geo",
         "CONSTRAINT_VIOLATION",&advice));
     assert(advice.choice==KOTZE_REPAIR_ABSTAIN);
-    assert(advice.strategy_key[0]=='\\0');
+    assert(advice.strategy_key[0]==0);
     OK(kotze_suggest_repair(k,"advise-work",advise_view.revision,
         "geometry-fix","environment-v1","context-geo",
         "MATH_UNGROUNDED",&advice));
@@ -258,6 +253,11 @@ int main(void){
         "CONSTRAINT_VIOLATION","minimal-formula-repair",&stats));
     assert(stats.verifier_reported_pass==1 && stats.verifier_reported_fail==1);
     STATUS(kotze_record_repair_episode(k,&ep_pass),KOTZE_REPLAY);
+    OK(kotze_suggest_repair(k,"advise-work",advise_view.revision,
+        "geometry-fix","environment-v1","context-geo",
+        "CONSTRAINT_VIOLATION",&advice));
+    assert(advice.choice==KOTZE_REPAIR_ADVISE);
+    assert(advice.distinct_work_pass==6);
     OK(kotze_next_option(k,"work-1",next,sizeof(next)));
     assert(strcmp(next,"hyp-5")==0);
     kotze_close(k);
