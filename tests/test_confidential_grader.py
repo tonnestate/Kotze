@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 import confidential_grader as cg
+import host_controller as hc
 import skill_grader as sg
 
 
@@ -21,10 +22,12 @@ class ConfidentialOracleTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
+        root.chmod(0o711)
         self.trusted, self.oracle, self.candidate, self.scratch = (
             root / 'trusted', root / 'trusted/oracle', root / 'candidate', root / 'scratch')
         for path in (self.trusted, self.oracle, self.candidate, self.scratch):
             path.mkdir(mode=0o700)
+        self.scratch.chmod(0o711)
         (self.candidate / 'main.py').write_text('print("candidate")\n')
         self.oracle_data = {'schema': 'kotze.oracle-cases.v1', 'cases': [
             {'id': 'zero', 'stdin_b64': b64(b'a\n'), 'stdout_b64': b64(b'A\n')},
@@ -38,7 +41,8 @@ class ConfidentialOracleTests(unittest.TestCase):
                          oracle=self.oracle, candidate=self.candidate,
                          scratch=self.scratch, receipts=self.receipts,
                          task_id='t', arm='SKILL',
-                         candidate_tree_sha256=sg.tree_digest(self.candidate))
+                         candidate_tree_sha256=sg.tree_digest(self.candidate),
+                         worker_uid=65534, worker_gid=65534)
 
     def write_oracle(self, *, protocol=cg.PROTOCOL):
         self.case_file.write_text(json.dumps(self.oracle_data))
@@ -59,6 +63,9 @@ class ConfidentialOracleTests(unittest.TestCase):
             pid = 11111
             def __init__(self, command, **kw):
                 invocations.append(command)
+                assert kw['user'] == 65534 and kw['group'] == 65534
+                assert kw['extra_groups'] == []
+                assert kw['env'] == {'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'}
                 assert '--unshare-all' in command
                 assert '--unshare-user' in command
                 assert '--unshare-net' in command
@@ -70,16 +77,30 @@ class ConfidentialOracleTests(unittest.TestCase):
                 assert '/oracle' not in ' '.join(command)
                 assert str(self_root.case_file) not in ' '.join(command)
                 assert not (Path(command[command.index('--bind') + 1]) / 'tests/secret.py').exists()
+                work = Path(command[command.index('--bind') + 1])
+                assert work.stat().st_uid == 65534
+                assert work.parent.stat().st_uid == 0
                 self.out = kw['stdout']
             def communicate(self, input=None, timeout=None):
                 self.out.write(output_for(input))
                 self.out.flush()
                 return (None, None)
         self_root = self
-        with patch.object(cg.shutil, 'which', return_value='/usr/bin/bwrap'):
+        with patch.object(cg.shutil, 'which', return_value='/bin/true'):
             with patch.object(cg.subprocess, 'Popen', FakePopen):
                 outcome = cg.grade(**self.args)
         return outcome, invocations
+
+    def test_refuse_worker_root_or_host_unprivileged(self):
+        self.args['worker_uid'] = 0
+        with patch.object(cg.shutil, 'which', return_value='/bin/true'):
+            with self.assertRaisesRegex(hc.Refused, 'non-root'):
+                cg.grade(**self.args)
+        self.args['worker_uid'] = 65534
+        with patch.object(cg.shutil, 'which', return_value='/bin/true'):
+            with patch.object(hc.os, 'geteuid', return_value=1000):
+                with self.assertRaisesRegex(hc.Refused, 'requires Linux host root'):
+                    cg.grade(**self.args)
 
     def test_two_cases_verified_by_host_without_oracle_mount(self):
         r, calls = self.mocked_grade()
@@ -105,19 +126,19 @@ class ConfidentialOracleTests(unittest.TestCase):
 
     def test_legacy_protocol_not_mislabeled_confidential(self):
         self.write_oracle(protocol='legacy-bwrap-oracle-mount')
-        with patch.object(cg.shutil, 'which', return_value='/usr/bin/bwrap'):
+        with patch.object(cg.shutil, 'which', return_value='/bin/true'):
             with self.assertRaisesRegex(sg.ContractError, 'explicitly opt'):
                 cg.grade(**self.args)
 
     def test_source_hash_must_match_exact_candidate(self):
         self.args['candidate_tree_sha256'] = '0' * 64
-        with patch.object(cg.shutil, 'which', return_value='/usr/bin/bwrap'):
+        with patch.object(cg.shutil, 'which', return_value='/bin/true'):
             with self.assertRaisesRegex(sg.ContractError, 'sealed pin'):
                 cg.grade(**self.args)
 
     def test_oracle_hash_must_match_manifest(self):
         self.case_file.write_text(self.case_file.read_text() + ' ')
-        with patch.object(cg.shutil, 'which', return_value='/usr/bin/bwrap'):
+        with patch.object(cg.shutil, 'which', return_value='/bin/true'):
             with self.assertRaisesRegex(sg.ContractError, 'digest mismatch'):
                 cg.grade(**self.args)
 
@@ -125,14 +146,14 @@ class ConfidentialOracleTests(unittest.TestCase):
         (self.candidate / 'tests').mkdir()
         (self.candidate / 'tests/secret.py').write_text('tampered')
         self.args['candidate_tree_sha256'] = sg.tree_digest(self.candidate)
-        with patch.object(cg.shutil, 'which', return_value='/usr/bin/bwrap'):
+        with patch.object(cg.shutil, 'which', return_value='/bin/true'):
             with self.assertRaisesRegex(sg.ContractError, 'protected'):
                 cg.grade(**self.args)
 
     def test_worker_cannot_use_host_directory_as_candidate(self):
         self.args['candidate'] = self.trusted
         self.args['candidate_tree_sha256'] = sg.tree_digest(self.trusted)
-        with patch.object(cg.shutil, 'which', return_value='/usr/bin/bwrap'):
+        with patch.object(cg.shutil, 'which', return_value='/bin/true'):
             with self.assertRaisesRegex(sg.ContractError, 'overlaps'):
                 cg.grade(**self.args)
 
@@ -144,21 +165,21 @@ class ConfidentialOracleTests(unittest.TestCase):
     def test_malformed_oracle_case_refused(self):
         self.oracle_data['cases'][1]['stdout_b64'] = 'not base64*!'
         self.write_oracle()
-        with patch.object(cg.shutil, 'which', return_value='/usr/bin/bwrap'):
+        with patch.object(cg.shutil, 'which', return_value='/bin/true'):
             with self.assertRaisesRegex(sg.ContractError, 'encoding'):
                 cg.grade(**self.args)
 
     def test_duplicate_oracle_case_id_refused(self):
         self.oracle_data['cases'][1]['id'] = 'zero'
         self.write_oracle()
-        with patch.object(cg.shutil, 'which', return_value='/usr/bin/bwrap'):
+        with patch.object(cg.shutil, 'which', return_value='/bin/true'):
             with self.assertRaisesRegex(sg.ContractError, 'Duplicate'):
                 cg.grade(**self.args)
 
     def test_symlink_in_candidate_refused(self):
         (self.candidate / 'escape').symlink_to(self.oracle)
         self.args['candidate_tree_sha256'] = '0' * 64
-        with patch.object(cg.shutil, 'which', return_value='/usr/bin/bwrap'):
+        with patch.object(cg.shutil, 'which', return_value='/bin/true'):
             with self.assertRaisesRegex(sg.ContractError, 'Symlink'):
                 cg.grade(**self.args)
 

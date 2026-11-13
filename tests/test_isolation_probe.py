@@ -87,6 +87,38 @@ class LiveProbeContractTests(unittest.TestCase):
                               bwrap=root / 'nonexistent-bwrap')
                     spawn.assert_not_called()
 
+    def test_host_canary_not_staged_in_worker_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            scratch = Path(tmp)
+            scratch.chmod(0o711)
+            observed = {}
+            class FakePopen:
+                pid = 43210
+                returncode = 0
+                def __init__(self, command, **kwargs):
+                    workspace = Path(command[command.index('--bind') + 1])
+                    config_bytes = (workspace / 'probe-config.json').read_bytes()
+                    config = json.loads(config_bytes)
+                    canary = Path(config['paths']['oracle']).read_text().split(':', 1)[1]
+                    assert kwargs['env']['KOTZE_ENV_PROBE'] == 'synthetic-not-a-secret'
+                    assert canary not in repr(kwargs['env'])
+                    observed['config'] = config
+                    observed['canary'] = canary
+                    assert canary.encode() not in config_bytes
+                    assert 'secret' not in config
+                    assert canary not in (workspace / 'probe.py').read_text()
+                    observed['nonce'] = config['nonce']
+                def communicate(self, timeout=None):
+                    return (json.dumps({'schema': 'kotze.isolation-probe-child.v1',
+                                        'nonce': observed['nonce'],
+                                        'checks': {name: True for name in p.CHECKS}}).encode(), b'')
+            with patch.object(p.subprocess, 'Popen', FakePopen):
+                record = p.run(worker_uid=65534, worker_gid=65534,
+                               scratch_root=scratch, bwrap=Path('/bin/true'))
+            self.assertEqual(record['state'], 'PASS')  # synthetic evidence shape only
+            self.assertNotIn('secret', observed['config'])
+            self.assertEqual(len(observed['canary']), 64)
+
     def test_valid_evidence_contract_but_not_live_proof(self):
         record = dict(schema='kotze.isolation-probe-child.v1', nonce='nonce',
                       checks={name: True for name in p.CHECKS})

@@ -35,7 +35,7 @@ CHECKS = frozenset({
 })
 
 # This script runs ONLY in the synthetic candidate namespace, never on the host.
-# Synthetic secret locations and public host namespace IDs are not credentials.
+# Synthetic host paths and namespace IDs are not credentials. Canary bytes must remain host-only.
 CHILD = r'''
 import json, os, pathlib, socket, sys
 c = json.loads(pathlib.Path('/work/probe-config.json').read_text())
@@ -62,9 +62,9 @@ checks['oracle_mount_absent'] = not pathlib.Path('/oracle').exists()
 for label in ('oracle', 'receipt', 'database', 'manifest'):
     checks[label + '_invisible'] = cannot_read(c['paths'][label])
 checks['host_ledger_unwritable'] = cannot_write(c['paths']['receipt'])
-checks['host_env_absent'] = os.environ.get('KOTZE_PRIVATE_CANARY') is None
+checks['host_env_absent'] = os.environ.get('KOTZE_ENV_PROBE') is None
 try:
-    checks['host_env_proc_absent'] = c['secret'] not in pathlib.Path('/proc/self/environ').read_bytes().decode('utf-8', 'replace')
+    checks['host_env_proc_absent'] = b'KOTZE_ENV_PROBE=' not in pathlib.Path('/proc/self/environ').read_bytes()
 except OSError:
     checks['host_env_proc_absent'] = False
 for name in ('net', 'pid', 'mnt', 'user'):
@@ -153,9 +153,11 @@ def run(*, worker_uid: int, worker_gid: int, scratch_root: Path,
             listener.bind(('127.0.0.1', 0))
             listener.listen(1)
             port = listener.getsockname()[1]
-            config = {'nonce': nonce, 'secret': canary, 'paths': files,
+            config = {'nonce': nonce, 'paths': files,
                       'namespaces': namespaces, 'port': port}
             (stage / 'probe-config.json').write_text(json.dumps(config))
+            if canary in (stage / 'probe-config.json').read_text():
+                raise Refused('Probe staged its private canary for worker access')
             (stage / 'probe.py').write_text(CHILD)
             for item in stage.iterdir():
                 item.chmod(0o444)
@@ -167,7 +169,8 @@ def run(*, worker_uid: int, worker_gid: int, scratch_root: Path,
                 p = subprocess.Popen(command, stdin=subprocess.DEVNULL,
                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                      user=worker_uid, group=worker_gid, extra_groups=[],
-                                     env={**os.environ, 'KOTZE_PRIVATE_CANARY': canary},
+                                     env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C',
+                                          'KOTZE_ENV_PROBE': 'synthetic-not-a-secret'},
                                      start_new_session=True, close_fds=True)
                 try:
                     stdout, stderr = p.communicate(timeout=12)
