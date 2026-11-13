@@ -14,5 +14,6 @@ build/test-core: tests/test_core.c src/kotze.c include/kotze.h | build
 check: build/test-core
 	./build/test-core
 	python3 -m unittest discover -s tests -p "test_skill_grader.py" -v
+	python3 -m unittest discover -s tests -p "test_gemma_worker.py" -v
 clean:
 	rm -rf build
