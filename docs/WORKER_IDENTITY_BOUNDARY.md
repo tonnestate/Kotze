@@ -4,7 +4,7 @@ Status: **implemented host-side UID/GID separation policy and local credential-d
 
 ## Enforced contract
 
-Both the regular worker host (`tools/host_controller.py`) and the host-private deterministic grader (`tools/confidential_grader.py`) now require **explicit non-root `--worker-uid` and `--worker-gid`**. The launcher rejects any non-Linux host, a non-root host-controller process, root as the worker account, nonexistent identities, and a group that is not the account's primary group. A dedicated OS account is still the deployment operator's responsibility; no claimed proof that a selected account is exclusive to this workload.
+Both the regular worker host (`tools/host_controller.py`) and the host-private deterministic grader (`tools/confidential_grader.py`) now require **explicit non-root `--worker-uid` and `--worker-gid`**. The launcher rejects any non-Linux host, a non-root host-controller process, root as the worker account, nonexistent identities, and a group that is not the account's primary group. Before launching it also requires the Bubblewrap executable to be an absolute regular file, root-owned, non-group/world-writable, and located entirely under trusted non-writable ancestor directories; injected worker-controlled PATH binaries are rejected. A dedicated OS account is still the deployment operator's responsibility; no claimed proof that a selected account is exclusive to this workload.
 
 Each candidate is copied by the trusted host to a fresh stage. Only that stage and its descendants are chowned to the worker account; every other host-only directory remains owned by the trusted controller. Files are restricted to 0600 or 0700 according to executable bits; directories use 0700. The worker process is launched with Python's `Popen(user=..., group=..., extra_groups=[])` and an explicit minimal environment, **before** entering the requested Bubblewrap user, PID, mount and network namespaces. No candidate inherits a supplementary host group.
 
@@ -34,7 +34,7 @@ The synthetic **private** canary is **no longer staged** inside `probe-config.js
 
 ## Evidence
 
-- Local 52/52 Python tests passed in a reduced checkout. Most use mocked candidate processes. The original repository's `skill_grader.py` was replaced locally with a compatibility-only test double, so this is **not** a complete-repository `make check`.
+- Local 53/53 Python tests passed in a reduced checkout. Most use mocked candidate processes. The original repository's `skill_grader.py` was replaced locally with a compatibility-only test double, so this is **not** a complete-repository `make check`.
 - A separate **real** host OS credential-drop unit test passed under Linux root: the worker process was UID/GID 65534 with an empty supplementary group list and could not read a root-owned, 0600 synthetic oracle file behind a 0700 host directory. This tests OS identity and DAC, **not** namespaces.
 - The live Bubblewrap probe still returns `ISOLATION_NOT_VERIFIED` (exit 2) in this environment because Bubblewrap is absent. No live sandbox PASS has been observed. No CI or hosted runner has been used.
 
