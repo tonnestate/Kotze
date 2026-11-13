@@ -2,6 +2,7 @@
 import hashlib
 import json
 from pathlib import Path
+import stat
 import sys
 import tempfile
 import unittest
@@ -85,6 +86,8 @@ class HostControllerTests(unittest.TestCase):
         self.assertFalse(record['verified'])
         self.assertFalse(record['oracle_mounted'])
         self.assertEqual(record['candidate_tree_sha256'], h.digest_tree(published))
+        self.assertEqual(stat.S_IMODE(published.stat().st_mode), 0o500)
+        self.assertEqual(stat.S_IMODE((published / 'src.py').stat().st_mode), 0o400)
         self.assertEqual((published / 'src.py').read_text(), 'print(456)\n')
         self.assertFalse((published / 'tests/hidden.py').exists())
         self.assertEqual((self.source / 'src.py').read_text(), 'print(123)\n')
@@ -124,6 +127,18 @@ class HostControllerTests(unittest.TestCase):
         with self.assertRaisesRegex(h.Refused, 'shadowed'):
             self.run_mocked(modify=change)
         self.assertFalse((self.publish / 'candidate-1').exists())
+
+    def test_rejects_atomic_publication_race_without_replacing_existing(self):
+        original = h.publish_noreplace
+        def race(source, parent, name):
+            intruder = self.publish / 'candidate-1'
+            intruder.mkdir()
+            (intruder / 'existing.txt').write_text('DO NOT REPLACE')
+            return original(source, parent, name)
+        with patch.object(h, 'publish_noreplace', side_effect=race):
+            with self.assertRaisesRegex(h.Refused, 'Publication already exists'):
+                self.run_mocked()
+        self.assertEqual((self.publish / 'candidate-1/existing.txt').read_text(), 'DO NOT REPLACE')
 
     def test_refuses_output_collision(self):
         (self.publish / 'candidate-1').mkdir()
