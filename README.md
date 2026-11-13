@@ -2,13 +2,15 @@
 
 The repository contains the first **C11/SQLite control-plane implementation** of KOTZE Harness. The library is language-agnostic and persists work identity, original requirements, event-driven finite-state transitions, repair candidates, verifier-bound outcome claims, enumerated hypotheses, action-budget reservations, anti-repeat decisions, and verified-success records.
 
+The [trusted worker host](docs/HOST_WORKER_ISOLATION.md) now stages a pinned candidate in a network-disconnected bubblewrap worker namespace **without mounting the oracle, manifest, receipts, or C11 database**. It outputs an unverified candidate snapshot. Its 11 offline tests use mocked sandbox execution; real OS-isolation acceptance has not been run.
+
 The [trusted receipt bridge](docs/TRUSTED_RECEIPT_BRIDGE.md) binds external grader receipts to the current C11 work snapshot and revision, rejecting a model's unverified PASS claim. The native CLI is still not authenticated and full isolation is not claimed.
 
 The [external skill grader](docs/SKILL_GRADER.md) performs paired task evaluation outside the worker workspace using frozen read-only oracles and a fail-closed OS-sandbox requirement. It statistically compares BASE versus SKILL under matched tasks; it is not an authenticated production verifier.
 
 The optional [Gemma worker adapter](docs/GEMMA_WORKER.md) binds local Ollama, Google's hosted Gemma 4 API, and OpenRouter's free Gemma 4 variants to the C11 MODEL-action reservation. Its responses are **unverified proposals**, not executed patches or grader receipts. Hosted calls require explicit domain-upload approval.
 
-**This is not yet an autonomous coding agent.** Model proposal HTTP calls are available via an optional trusted-host adapter; autonomous tool execution, source-code editing, fully isolated worker execution, and integrated end-to-end repair verification remain unfinished. The CLI is a trusted local diagnostic interface, **not** an externally accessible API or a security boundary against malicious workers. A future host service must enforce caller identity and execute only journaled, authorized tool actions. In particular, passing `VERIFIER` on this CLI is *not* independent proof by itself.
+**This is not yet an autonomous coding agent.** Model proposal HTTP calls are available via an optional trusted-host adapter; autonomous tool execution, source-code editing, **live-tested** worker isolation, a confidential oracle protocol, and integrated end-to-end repair verification remain unfinished. The CLI is a trusted local diagnostic interface, **not** an externally accessible API or a security boundary against malicious workers. A future host service must enforce caller identity and execute only journaled, authorized tool actions. In particular, passing `VERIFIER` on this CLI is *not* independent proof by itself.
 
 ## Local build (no GitHub Actions / hosted runners)
 
