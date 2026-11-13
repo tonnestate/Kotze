@@ -24,6 +24,7 @@ import time
 
 import host_controller as hc
 import skill_grader as sg
+import worker_identity as identity
 
 PROTOCOL = 'host-oracle-stdin-v1'
 MAX_CASES = 128
@@ -77,7 +78,7 @@ def safe_paths(trusted: Path, manifest: Path, oracle: Path, candidate: Path,
     trusted = hc.strict_dir(trusted, private=True)
     oracle = hc.strict_dir(oracle, private=True)
     candidate = hc.strict_dir(candidate)
-    scratch = hc.strict_dir(scratch, private=True)
+    scratch = identity.require_traversable_scratch(scratch)
     if manifest.is_symlink() or not manifest.is_file() or receipts.is_symlink():
         raise sg.ContractError('Untrusted manifest or receipt path')
     manifest = manifest.resolve(strict=True)
@@ -102,12 +103,14 @@ def sealed_candidate(candidate: Path, protected: set[Path]) -> None:
 
 def execute_one(*, bwrap: str, candidate: Path, scratch: Path, argv: list[str],
                 input_data: bytes, timeout: float, expected: bytes,
-                protected: set[Path]) -> tuple[str, int | None]:
+                protected: set[Path], worker_uid: int, worker_gid: int) -> tuple[str, int | None]:
     with tempfile.TemporaryDirectory(prefix='.kotze-oracle-case-', dir=scratch) as tmp:
+        Path(tmp).chmod(0o711)
         work = Path(tmp) / 'work'
         work.mkdir(mode=0o700)
         hc.clone_tree(candidate, work, protected)
         sealed_candidate(work, protected)
+        identity.prepare_worker_stage(work, worker_uid, worker_gid)
         command = hc.worker_command(bwrap, work, argv)
         stdout_file, stderr_file = Path(tmp) / 'stdout', Path(tmp) / 'stderr'
 
@@ -119,9 +122,12 @@ def execute_one(*, bwrap: str, candidate: Path, scratch: Path, argv: list[str],
 
         try:
             with stdout_file.open('wb') as out, stderr_file.open('wb') as err:
+                stdout_file.chmod(0o600)
+                stderr_file.chmod(0o600)
                 process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=out,
                                            stderr=err, close_fds=True, start_new_session=True,
-                                           preexec_fn=limits)
+                                           preexec_fn=limits,
+                                           **identity.worker_process_options(worker_uid, worker_gid))
                 try:
                     process.communicate(input=input_data, timeout=timeout)
                 except subprocess.TimeoutExpired:
@@ -134,7 +140,9 @@ def execute_one(*, bwrap: str, candidate: Path, scratch: Path, argv: list[str],
             if code is None or code in (125, 126, 127) or code < 0:
                 return 'INCONCLUSIVE', None
             if code != 0:
-                return 'FAIL', code
+                # Without a launch handshake an exit code cannot distinguish
+                # candidate failure from bwrap setup failure. Never certify it.
+                return 'INCONCLUSIVE', None
             observed = stdout_file.read_bytes()
             if hmac.compare_digest(observed, expected):
                 return 'PASS', 0
@@ -145,12 +153,13 @@ def execute_one(*, bwrap: str, candidate: Path, scratch: Path, argv: list[str],
 
 def grade(*, trusted: Path, manifest: Path, oracle: Path, candidate: Path,
           scratch: Path, receipts: Path, task_id: str, arm: str,
-          candidate_tree_sha256: str) -> dict:
+          candidate_tree_sha256: str, worker_uid: int, worker_gid: int) -> dict:
     if sys.platform != 'linux':
         raise sg.ContractError('Linux isolation required')
     bwrap = shutil.which('bwrap')
     if bwrap is None:
         raise sg.ContractError('bubblewrap absent: no unsandboxed fallback')
+    identity.require_worker_identity(worker_uid, worker_gid)
     if arm not in sg.ARMS:
         raise sg.ContractError('Unknown study arm')
     trusted, manifest, oracle, candidate, scratch, receipts = safe_paths(
@@ -185,7 +194,8 @@ def grade(*, trusted: Path, manifest: Path, oracle: Path, candidate: Path,
             break
         state, exit_code = execute_one(bwrap=bwrap, candidate=candidate, scratch=scratch,
                                        argv=argv, input_data=input_data, timeout=remaining,
-                                       expected=expected, protected=protected)
+                                       expected=expected, protected=protected,
+                                       worker_uid=worker_uid, worker_gid=worker_gid)
         if state != 'PASS':
             reason = 'TRUSTED_RUNNER_EXIT' if state == 'FAIL' else 'HOST_TEST_INCONCLUSIVE'
             break
@@ -203,6 +213,7 @@ def grade(*, trusted: Path, manifest: Path, oracle: Path, candidate: Path,
         'independent_execution_attestation': 'TRUSTED_HOST_CONFIGURATION_REQUIRED',
         'grader_protocol': PROTOCOL, 'oracle_visibility': 'host-only',
         'case_count': len(cases), 'passed_cases': passed,
+        'worker_host_uid': worker_uid, 'worker_host_gid': worker_gid,
     }
     sg.append_receipt(receipts, record)
     return record
@@ -214,6 +225,8 @@ def main() -> int:
         parser.add_argument('--' + name, required=True, type=Path)
     for name in ('task_id', 'arm', 'candidate_tree_sha256'):
         parser.add_argument('--' + name.replace('_', '-'), required=True)
+    parser.add_argument('--worker-uid', type=int, required=True)
+    parser.add_argument('--worker-gid', type=int, required=True)
     args = parser.parse_args()
     try:
         result = grade(**vars(args))
