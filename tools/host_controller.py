@@ -159,9 +159,7 @@ def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
                timeout: int = 120, worker_uid: int, worker_gid: int) -> dict:
     if os.name != 'posix' or sys.platform != 'linux':
         raise Refused('Linux namespace sandbox required')
-    bwrap = shutil.which('bwrap')
-    if not bwrap:
-        raise Refused('bubblewrap absent; unsandboxed worker forbidden')
+    bwrap = identity.require_trusted_bwrap(shutil.which('bwrap'))
     identity.require_worker_identity(worker_uid, worker_gid)
     if arm not in ('BASE', 'SKILL') or type(timeout) is not int or not 1 <= timeout <= 300:
         raise Refused('Invalid arm or worker timeout')
