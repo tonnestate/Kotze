@@ -17,6 +17,7 @@ import sys
 from skill_grader import (ARMS, ContractError, RECEIPT_SCHEMA, STATES, canonical,
                           load_study, sha, task_of, tree_digest, under)
 from receipt_contract import validate_confidential_receipt
+from confidential_grader import load_cases
 
 
 def trusted_file(path: Path) -> Path:
@@ -100,6 +101,8 @@ def bridge(*, db: Path, core: Path, manifest: Path, receipts: Path,
     r, task, _ = verified_receipt(manifest, receipts, task_id, arm)
     if tree_digest(oracle) != task["oracle_sha256"]:
         raise ContractError("Sealed oracle changed after grade")
+    if len(load_cases(oracle)) != r["case_count"]:
+        raise ContractError("Receipt case count differs from sealed private oracle")
     if tree_digest(candidate) != r["candidate_tree_sha256"]:
         raise ContractError("Candidate changed after external grade")
     state = snapshot(db, work_id)
