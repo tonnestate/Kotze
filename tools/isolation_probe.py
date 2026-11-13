@@ -123,6 +123,13 @@ def assert_preflight(worker_uid: int, worker_gid: int, scratch_root: Path) -> Pa
     return scratch_root.resolve(strict=True)
 
 
+def public_probe_config(*, nonce: str, files: dict, namespaces: dict,
+                        port: int, worker_uid: int) -> dict:
+    """Only public test metadata enters the worker namespace; no host canary."""
+    return {'nonce': nonce, 'paths': files, 'worker_uid': worker_uid,
+            'namespaces': namespaces, 'port': port}
+
+
 def run(*, worker_uid: int, worker_gid: int, scratch_root: Path,
         bwrap: Path = Path('/usr/bin/bwrap')) -> dict:
     """Live-only: never use a fake bwrap binary and never return PASS on setup errors."""
@@ -160,8 +167,9 @@ def run(*, worker_uid: int, worker_gid: int, scratch_root: Path,
             listener.listen(1)
             port = listener.getsockname()[1]
             # Never disclose even synthetic expected canary values through /work.
-            config = {'nonce': nonce, 'paths': files, 'worker_uid': worker_uid,
-                      'namespaces': namespaces, 'port': port}
+            config = public_probe_config(nonce=nonce, files=files,
+                                         namespaces=namespaces, port=port,
+                                         worker_uid=worker_uid)
             (stage / 'probe-config.json').write_text(json.dumps(config))
             (stage / 'probe.py').write_text(CHILD)
             if canary.encode() in (stage / 'probe-config.json').read_bytes():
