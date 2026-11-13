@@ -71,7 +71,7 @@ class HostControllerTests(unittest.TestCase):
             if modify:
                 modify(work)
             return FakeProcess()
-        with patch.object(h.shutil, 'which', return_value='/usr/bin/bwrap'):
+        with patch.object(h.shutil, 'which', return_value='/bin/true'):
             with patch.object(h.subprocess, 'Popen', side_effect=fake_spawn):
                 return h.run_worker(**self.args), events
 
@@ -100,7 +100,7 @@ class HostControllerTests(unittest.TestCase):
 
     def test_wrong_source_pin_refused_before_worker(self):
         self.args['expected_source_sha256'] = '0' * 64
-        with patch.object(h.shutil, 'which', return_value='/usr/bin/bwrap'):
+        with patch.object(h.shutil, 'which', return_value='/bin/true'):
             with patch.object(h.subprocess, 'Popen') as run:
                 with self.assertRaisesRegex(h.Refused, 'differs from trusted pin'):
                     h.run_worker(**self.args)
@@ -127,33 +127,43 @@ class HostControllerTests(unittest.TestCase):
 
     def test_refuses_output_collision(self):
         (self.publish / 'candidate-1').mkdir()
-        with patch.object(h.shutil, 'which', return_value='/usr/bin/bwrap'):
+        with patch.object(h.shutil, 'which', return_value='/bin/true'):
             with self.assertRaisesRegex(h.Refused, 'already exists'):
                 h.run_worker(**self.args)
 
     def test_refuses_trusted_and_candidate_overlap(self):
         self.args['source'] = self.trusted
         self.args['expected_source_sha256'] = h.digest_tree(self.trusted)
-        with patch.object(h.shutil, 'which', return_value='/usr/bin/bwrap'):
+        with patch.object(h.shutil, 'which', return_value='/bin/true'):
             with self.assertRaisesRegex(h.Refused, 'overlaps'):
                 h.run_worker(**self.args)
 
     def test_refuses_non_host_private_scratch(self):
         self.scratch.chmod(0o755)
-        with patch.object(h.shutil, 'which', return_value='/usr/bin/bwrap'):
+        with patch.object(h.shutil, 'which', return_value='/bin/true'):
             with self.assertRaisesRegex(h.Refused, 'mode 0711'):
                 h.run_worker(**self.args)
 
+    def test_rejects_bubblewrap_from_worker_writable_ancestor(self):
+        untrusted = Path(self.temp.name) / 'bwrap'
+        untrusted.write_text('#!/bin/sh\nexit 0\n')
+        untrusted.chmod(0o755)
+        with patch.object(h.shutil, 'which', return_value=str(untrusted)):
+            with patch.object(h.subprocess, 'Popen') as spawn:
+                with self.assertRaisesRegex(h.Refused, 'untrusted ancestor'):
+                    h.run_worker(**self.args)
+                spawn.assert_not_called()
+
     def test_refuses_worker_root_uid(self):
         self.args['worker_uid'] = 0
-        with patch.object(h.shutil, 'which', return_value='/usr/bin/bwrap'):
+        with patch.object(h.shutil, 'which', return_value='/bin/true'):
             with patch.object(h.subprocess, 'Popen') as spawn:
                 with self.assertRaisesRegex(h.Refused, 'non-root'):
                     h.run_worker(**self.args)
                 spawn.assert_not_called()
 
     def test_refuses_non_root_host(self):
-        with patch.object(h.shutil, 'which', return_value='/usr/bin/bwrap'):
+        with patch.object(h.shutil, 'which', return_value='/bin/true'):
             with patch.object(h.os, 'geteuid', return_value=1000):
                 with patch.object(h.subprocess, 'Popen') as spawn:
                     with self.assertRaisesRegex(h.Refused, 'requires Linux host root'):
@@ -162,7 +172,7 @@ class HostControllerTests(unittest.TestCase):
 
     def test_refuses_worker_nonprimary_privileged_group(self):
         self.args['worker_gid'] = 1
-        with patch.object(h.shutil, 'which', return_value='/usr/bin/bwrap'):
+        with patch.object(h.shutil, 'which', return_value='/bin/true'):
             with patch.object(h.subprocess, 'Popen') as spawn:
                 with self.assertRaisesRegex(h.Refused, 'primary group'):
                     h.run_worker(**self.args)
@@ -170,7 +180,7 @@ class HostControllerTests(unittest.TestCase):
 
     def test_refuses_nontraversable_worker_parent(self):
         Path(self.temp.name).chmod(0o700)
-        with patch.object(h.shutil, 'which', return_value='/usr/bin/bwrap'):
+        with patch.object(h.shutil, 'which', return_value='/bin/true'):
             with self.assertRaisesRegex(h.Refused, 'ancestor'):
                 h.run_worker(**self.args)
 
