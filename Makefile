@@ -21,5 +21,7 @@ check: build/test-core build/kotze-core
 	python3 -m unittest discover -s tests -p "test_confidential_grader.py" -v
 	python3 -m unittest discover -s tests -p "test_receipt_contract.py" -v
 	python3 -m unittest discover -s tests -p "test_isolation_probe.py" -v
+	python3 -m unittest discover -s tests -p "test_worker_identity.py" -v
+	python3 -m unittest discover -s tests -p "test_worker_os_boundary.py" -v
 clean:
 	rm -rf build
