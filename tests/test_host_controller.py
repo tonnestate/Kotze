@@ -16,9 +16,11 @@ class HostControllerTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         root = Path(self.temp.name)
+        root.chmod(0o711)
         self.trusted, self.source, self.scratch, self.publish = [root / p for p in ('trusted', 'source', 'scratch', 'published')]
         for path in (self.trusted, self.source, self.scratch, self.publish):
             path.mkdir(mode=0o700)
+        self.scratch.chmod(0o711)
         (self.trusted / 'oracle').mkdir(mode=0o700)
         (self.trusted / 'oracle' / 'test.py').write_text('assert SECRET_DO_NOT_LEAK\n')
         (self.source / 'src.py').write_text('print(123)\n')
@@ -33,7 +35,8 @@ class HostControllerTests(unittest.TestCase):
         self.args = dict(trusted=self.trusted, manifest=self.manifest, task_id='t', arm='BASE',
                          source=self.source, expected_source_sha256=h.digest_tree(self.source),
                          scratch=self.scratch, publish_parent=self.publish,
-                         output_name='candidate-1', argv=['/usr/bin/python3', '-c', 'print(1)'])
+                         output_name='candidate-1', argv=['/usr/bin/python3', '-c', 'print(1)'],
+                         worker_uid=65534, worker_gid=65534)
 
     def run_mocked(self, modify=None, returncode=0):
         events = []
@@ -43,6 +46,10 @@ class HostControllerTests(unittest.TestCase):
                 return returncode
         def fake_spawn(cmd, **kwargs):
             events.append(cmd)
+            self.assertEqual(kwargs['user'], 65534)
+            self.assertEqual(kwargs['group'], 65534)
+            self.assertEqual(kwargs['extra_groups'], [])
+            self.assertEqual(kwargs['env'], {'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'})
             self.assertIn('--unshare-all', cmd)
             self.assertIn('--unshare-user', cmd)
             self.assertIn('--unshare-net', cmd)
@@ -55,6 +62,10 @@ class HostControllerTests(unittest.TestCase):
             self.assertNotIn(str(self.trusted / 'oracle'), cmd)
             self.assertNotIn('SECRET_DO_NOT_LEAK', repr(cmd))
             work = Path(cmd[cmd.index('--bind') + 1])
+            self.assertEqual(work.stat().st_uid, 65534)
+            self.assertEqual(work.stat().st_gid, 65534)
+            self.assertEqual(work.parent.stat().st_uid, 0)
+            self.assertEqual(work.parent.stat().st_mode & 0o777, 0o711)
             self.assertFalse((work / 'tests/hidden.py').exists())
             self.assertTrue((work / 'src.py').is_file())
             if modify:
@@ -130,7 +141,37 @@ class HostControllerTests(unittest.TestCase):
     def test_refuses_non_host_private_scratch(self):
         self.scratch.chmod(0o755)
         with patch.object(h.shutil, 'which', return_value='/usr/bin/bwrap'):
-            with self.assertRaisesRegex(h.Refused, 'privately owned'):
+            with self.assertRaisesRegex(h.Refused, 'mode 0711'):
+                h.run_worker(**self.args)
+
+    def test_refuses_worker_root_uid(self):
+        self.args['worker_uid'] = 0
+        with patch.object(h.shutil, 'which', return_value='/usr/bin/bwrap'):
+            with patch.object(h.subprocess, 'Popen') as spawn:
+                with self.assertRaisesRegex(h.Refused, 'non-root'):
+                    h.run_worker(**self.args)
+                spawn.assert_not_called()
+
+    def test_refuses_non_root_host(self):
+        with patch.object(h.shutil, 'which', return_value='/usr/bin/bwrap'):
+            with patch.object(h.os, 'geteuid', return_value=1000):
+                with patch.object(h.subprocess, 'Popen') as spawn:
+                    with self.assertRaisesRegex(h.Refused, 'requires Linux host root'):
+                        h.run_worker(**self.args)
+                    spawn.assert_not_called()
+
+    def test_refuses_worker_nonprimary_privileged_group(self):
+        self.args['worker_gid'] = 1
+        with patch.object(h.shutil, 'which', return_value='/usr/bin/bwrap'):
+            with patch.object(h.subprocess, 'Popen') as spawn:
+                with self.assertRaisesRegex(h.Refused, 'primary group'):
+                    h.run_worker(**self.args)
+                spawn.assert_not_called()
+
+    def test_refuses_nontraversable_worker_parent(self):
+        Path(self.temp.name).chmod(0o700)
+        with patch.object(h.shutil, 'which', return_value='/usr/bin/bwrap'):
+            with self.assertRaisesRegex(h.Refused, 'ancestor'):
                 h.run_worker(**self.args)
 
     def test_rejects_absolute_or_traversing_protected_path(self):
