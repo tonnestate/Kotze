@@ -54,8 +54,8 @@ int main(void){
     OK(kpb_unsettled(p,"a-diff",page,2,&n));assert(n==0);
     /* Old-version diagnostic is rejected after a work event. */
     assert(kotze_admit_action(core,"work-b","a-stale","READ",
-           "probe:v1:git-status","sandbox-identity",0)==KOTZE_OK);
-    OK(kpb_reserve(p,"a-stale","git-status","sandbox-identity"));
+           "probe:v1:git-status","sandbox-identity-v2",0)==KOTZE_OK);
+    OK(kpb_reserve(p,"a-stale","git-status","sandbox-identity-v2"));
     OK(kpb_claim(p,"a-stale",&token));
     assert(token==1);
     kotze_event change={"work-b","ev-change","CONTRACT_VALID",
