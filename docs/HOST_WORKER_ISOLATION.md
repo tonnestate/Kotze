@@ -4,7 +4,7 @@
 
 ## Required layout and controls
 
-Use a separately managed, trusted Linux host. Install and evaluate `bubblewrap` locally; user namespaces must work, or execution fails closed. Provide distinct, nonoverlapping directories for the source, private trusted assets, private temporary worker stages and private candidate publication. `trusted`, `scratch` and `publish-parent` must be owned by the effective host UID with mode 0700. Never place the full FruitStack source, tokens, oracle or secrets inside the candidate source tree. The deployment should use a dedicated unprivileged worker user and a separately privileged trusted host. A Linux namespace is not a substitute for kernel hardening or separate OS identities.
+Use a separately managed, trusted Linux host. Install and evaluate `bubblewrap` locally; user namespaces must work, or execution fails closed. Provide distinct, nonoverlapping directories for the source, private trusted assets, private temporary worker stages and private candidate publication. `trusted` and `publish-parent` must be host-owned and private (0700). `scratch` must instead be host-owned, traverse-only (0711), non-listable to the worker, so the worker UID can reach only its randomized 0700 worker-owned stage. Every execution now requires explicit non-root worker UID/GID, Linux root bootstrap privileges to drop credentials, and a trusted root-owned Bubblewrap launcher path. Never place the full FruitStack source, tokens, oracle or secrets inside the candidate source tree. The deployment should use a dedicated unprivileged worker user and a separately privileged trusted host. A Linux namespace is not a substitute for kernel hardening or separate OS identities.
 
 The approved study manifest stays under `trusted`. Its `protected_paths` are removed **before** worker execution and stripped again **after** worker execution. The private oracle is never opened by this controller and is never bound into the worker namespace. Only read-only Linux runtime paths and `/work`, isolated `/tmp`, `/proc` and `/dev` are mounted. The worker receives explicit argv, no shell expansion, an empty environment except minimal fixed values, no host network namespace, bounded wall time, CPU and output file limits. Absent bubblewrap, nonzero exit, invalid input, snapshot mismatch, symlink/special-file appearance or conflicting publication means rejection with no output.
 
@@ -17,7 +17,8 @@ python3 tools/host_controller.py \
   --source /srv/kotze/sources/task-001 \
   --expected-source-sha256 <trusted-tree-digest> \
   --scratch /srv/kotze/scratch --publish-parent /srv/kotze/candidates \
-  --output-name task-001-skill --timeout 120 \
+  --output-name task-001-skill --timeout 120 \\
+  --worker-uid <dedicated-uid> --worker-gid <dedicated-gid> \
   -- /usr/bin/python3 -B /work/worker.py
 ```
 
