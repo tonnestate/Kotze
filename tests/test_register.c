@@ -39,7 +39,7 @@ int main(void){
     CHECK(kr_link(r,"r-work",w.revision,w.evidence_epoch,
         "a-sym","c-file","CALLS"),KR_OK);
     CHECK(kr_link(r,"r-work",w.revision,w.evidence_epoch,
-        "a-sym","missing","CALLS"),KR_ERROR);
+        "a-sym","missing","CALLS"),KR_DENIED);
     kr_cursor cursor;
     CHECK(kr_cursor_open(r,"r-work","a-sym",w.revision,w.evidence_epoch,
         &cursor),KR_OK);

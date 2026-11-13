@@ -31,10 +31,12 @@ change can promote a new safety policy or alter the native trust boundary.
 ## Performance-first C11 registry/cursor plan
 
 The deterministic hot path should remain native C11 wherever it provides a
-measured correctness, latency or cost benefit. The first native C11 register implementation uses
-a versioned, position-specific registry/cursor (inspired by StrawberryMe's
-MAP_CURSOR), bounded asynchronous I/O and parallel independent reads, while
-serializing shared writes and verifier-critical transitions. **Immutable indexed entries, directed links and revision-/generation-bound\nread cursors now have source code and unexecuted test cases; the asynchronous\nscheduler and OS-isolated host are still not implemented.** See the
+measured correctness, latency or cost benefit. The first native C11 implementation adds a versioned, position-specific
+registry/cursor (inspired by StrawberryMe's MAP_CURSOR). The planned next
+stage adds bounded asynchronous I/O and parallel independent reads while
+serializing shared writes and verifier-critical transitions. **Immutable indexed entries, directed links and revision-/generation-bound
+read cursors now have source code and unexecuted test cases. The asynchronous
+scheduler and OS-isolated host are not yet implemented.** See the
 [Performance and Registry/Cursor design](docs/KOTZE-ORIGINAL-PERFORMANCE-REGISTER-CURSOR.md).
 
 ## Local build (no GitHub Actions / hosted runners)

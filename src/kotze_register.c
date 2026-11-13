@@ -161,6 +161,21 @@ int kr_link(kotze_register_t *r,const char *work,int64_t rev,int64_t epoch,
     }
     sqlite3_finalize(s);
     if(st!=SQLITE_DONE)return end_tx(r,fail(r,KR_ERROR,sqlite3_errmsg(r->db)));
+    /* Resolve both foreign-key endpoints explicitly for predictable denial;
+     * FK constraints remain the final safety net under this transaction. */
+    rc=prep(r,&s,"SELECT COUNT(*) FROM register_entries"
+        " WHERE work_id=? AND work_revision=? AND object_key IN (?,?)");
+    if(rc<0)return end_tx(r,rc);
+    bind(s,1,work);sqlite3_bind_int64(s,2,rev);
+    bind(s,3,from);bind(s,4,to);
+    st=sqlite3_step(s);
+    if(st!=SQLITE_ROW){
+        sqlite3_finalize(s);
+        return end_tx(r,fail(r,KR_ERROR,"could not resolve register endpoints"));
+    }
+    int present=sqlite3_column_int(s,0);
+    sqlite3_finalize(s);
+    if(present!=2)return end_tx(r,fail(r,KR_DENIED,"missing linked register object"));
     rc=prep(r,&s,"INSERT INTO register_edges"
         "(work_id,work_revision,from_key,to_key,relation) VALUES(?,?,?,?,?)");
     if(rc<0)return end_tx(r,rc);
