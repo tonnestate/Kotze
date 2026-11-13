@@ -37,6 +37,15 @@ Run the controller with explicit `--worker-root /srv/kotze/worker-stage --worker
 - **No Landlock or seccomp addition yet:** These are independent hardening layers, not a substitute for enforcing a separate host UID.
 - **No performance measurements:** Per-test processes and source copies add overhead; the efficiency hypothesis remains untested.
 
+## Optional real UID test, independent from bubblewrap
+
+The repository contains `tests/test_uid_boundary_live.py`, using **synthetic** host-owned files and the actual `host_controller.worker_stage` function. It is **not** included in ordinary `make check`; run it only on an isolated Linux host with a dedicated disposable UID/GID and explicit approval:
+
+    KOTZE_TEST_UID=<WORKER_UID> KOTZE_TEST_GID=<WORKER_GID> \
+      python3 -m unittest discover -s tests -p 'test_uid_boundary_live.py' -v
+
+The test requires host root for a credential drop; it never invokes bubblewrap and cannot prove namespace, network, kernel exploit or authenticated-verifier isolation. It checks that worker source files remain writable, synthetic trusted files remain unreadable, and a worker cannot add or rename entries in the host-owned staging parent. Missing root or missing UID/GID skips the test rather than claiming a PASS.
+
 ## Acceptance gates
 
 **G1 — Host identity:** Successful real bwrap execution under a worker UID different from the trusted process; confirm `/proc` credentials and inability to access trusted directories. Negative controls must fail closed when the worker UID equals 0, worker-root ownership/mode changes, user namespaces fail, or bubblewrap is missing.
