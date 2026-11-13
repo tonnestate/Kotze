@@ -41,6 +41,15 @@ sandbox, external tool runner, model runtime or measured performance gain.
 The new tests have not been run.** See the
 [Performance and Registry/Cursor design](docs/KOTZE-ORIGINAL-PERFORMANCE-REGISTER-CURSOR.md).
 
+## Scoped read-only Unix IPC host
+
+A Linux-only native read host now exposes the two registry lookup operations
+over a Unix socket. It authenticates the caller UID with SO_PEERCRED, pins the
+allowed work ID and uses the bounded asynchronous reader pool. It **cannot
+execute code, change work state or claim independent verification**. See
+[read-only host boundaries](docs/KOTZE-ORIGINAL-READ-HOST.md). Runtime
+security testing and deployment have not been performed.
+
 ## Local build (no GitHub Actions / hosted runners)
 
 Requirements: C11 compiler, SQLite3 development library, `make`.
