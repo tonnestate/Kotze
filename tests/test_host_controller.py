@@ -17,7 +17,8 @@ class HostControllerTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         root = Path(self.temp.name)
         self.trusted, self.source, self.scratch, self.publish = [root / p for p in ('trusted', 'source', 'scratch', 'published')]
-        for path in (self.trusted, self.source, self.scratch, self.publish):
+        self.worker_root = root / 'worker-stage'
+        for path in (self.trusted, self.source, self.scratch, self.publish, self.worker_root):
             path.mkdir(mode=0o700)
         (self.trusted / 'oracle').mkdir(mode=0o700)
         (self.trusted / 'oracle' / 'test.py').write_text('assert SECRET_DO_NOT_LEAK\n')
@@ -33,7 +34,8 @@ class HostControllerTests(unittest.TestCase):
         self.args = dict(trusted=self.trusted, manifest=self.manifest, task_id='t', arm='BASE',
                          source=self.source, expected_source_sha256=h.digest_tree(self.source),
                          scratch=self.scratch, publish_parent=self.publish,
-                         output_name='candidate-1', argv=['/usr/bin/python3', '-c', 'print(1)'])
+                         output_name='candidate-1', argv=['/usr/bin/python3', '-c', 'print(1)'],
+                         worker_root=self.worker_root, worker_uid=65534, worker_gid=65534)
 
     def run_mocked(self, modify=None, returncode=0):
         events = []
@@ -43,6 +45,11 @@ class HostControllerTests(unittest.TestCase):
                 return returncode
         def fake_spawn(cmd, **kwargs):
             events.append(cmd)
+            self.assertEqual(kwargs['user'], 65534)
+            self.assertEqual(kwargs['group'], 65534)
+            self.assertEqual(kwargs['extra_groups'], [])
+            self.assertNotIn('KOTZE_PRIVATE_CANARY', kwargs['env'])
+            self.assertNotIn('SECRET_DO_NOT_LEAK', repr(kwargs['env']))
             self.assertIn('--unshare-all', cmd)
             self.assertIn('--unshare-user', cmd)
             self.assertIn('--unshare-net', cmd)
@@ -61,8 +68,12 @@ class HostControllerTests(unittest.TestCase):
                 modify(work)
             return FakeProcess()
         with patch.object(h.shutil, 'which', return_value='/usr/bin/bwrap'):
-            with patch.object(h.subprocess, 'Popen', side_effect=fake_spawn):
-                return h.run_worker(**self.args), events
+            with patch.object(h, 'require_worker_identity', return_value=self.worker_root):
+                with patch.object(h.os, 'chown') as chown:
+                    with patch.object(h.subprocess, 'Popen', side_effect=fake_spawn):
+                        outcome = h.run_worker(**self.args)
+                        self.assertTrue(chown.called)
+                        return outcome, events
 
     def test_publishes_worker_candidate_without_hidden_oracle(self):
         def change(work):
@@ -90,10 +101,11 @@ class HostControllerTests(unittest.TestCase):
     def test_wrong_source_pin_refused_before_worker(self):
         self.args['expected_source_sha256'] = '0' * 64
         with patch.object(h.shutil, 'which', return_value='/usr/bin/bwrap'):
-            with patch.object(h.subprocess, 'Popen') as run:
-                with self.assertRaisesRegex(h.Refused, 'differs from trusted pin'):
-                    h.run_worker(**self.args)
-                run.assert_not_called()
+            with patch.object(h, 'require_worker_identity', return_value=self.worker_root):
+                with patch.object(h.subprocess, 'Popen') as run:
+                    with self.assertRaisesRegex(h.Refused, 'differs from trusted pin'):
+                        h.run_worker(**self.args)
+                    run.assert_not_called()
 
     def test_no_publication_on_worker_error(self):
         with self.assertRaisesRegex(h.Refused, 'exited 1'):
@@ -117,15 +129,17 @@ class HostControllerTests(unittest.TestCase):
     def test_refuses_output_collision(self):
         (self.publish / 'candidate-1').mkdir()
         with patch.object(h.shutil, 'which', return_value='/usr/bin/bwrap'):
-            with self.assertRaisesRegex(h.Refused, 'already exists'):
-                h.run_worker(**self.args)
+            with patch.object(h, 'require_worker_identity', return_value=self.worker_root):
+                with self.assertRaisesRegex(h.Refused, 'already exists'):
+                    h.run_worker(**self.args)
 
     def test_refuses_trusted_and_candidate_overlap(self):
         self.args['source'] = self.trusted
         self.args['expected_source_sha256'] = h.digest_tree(self.trusted)
         with patch.object(h.shutil, 'which', return_value='/usr/bin/bwrap'):
-            with self.assertRaisesRegex(h.Refused, 'overlaps'):
-                h.run_worker(**self.args)
+            with patch.object(h, 'require_worker_identity', return_value=self.worker_root):
+                with self.assertRaisesRegex(h.Refused, 'overlaps'):
+                    h.run_worker(**self.args)
 
     def test_refuses_non_host_private_scratch(self):
         self.scratch.chmod(0o755)
@@ -139,6 +153,29 @@ class HostControllerTests(unittest.TestCase):
                 {'task_id': 't', 'protected_paths': [unsafe]}]}))
             with self.assertRaisesRegex(h.Refused, 'path'):
                 h.protected_paths(self.manifest, 't')
+
+    def test_refuses_unprivileged_host_identity(self):
+        with patch.object(h.os, 'geteuid', return_value=1000):
+            with self.assertRaisesRegex(h.Refused, 'requires Linux root'):
+                h.require_worker_identity(65534, 65534, self.worker_root)
+
+    def test_refuses_same_worker_as_root(self):
+        with patch.object(h.os, 'geteuid', return_value=0):
+            with self.assertRaisesRegex(h.Refused, 'positive non-root'):
+                h.require_worker_identity(0, 65534, self.worker_root)
+
+    def test_rejects_worker_owned_or_group_writable_staging_parent(self):
+        # A worker-controlled parent would permit directory swaps before the host seal.
+        with patch.object(h.os, 'geteuid', return_value=0):
+            with self.assertRaisesRegex(h.Refused, 'host-owned'):
+                h.require_worker_identity(65534, 65534, self.worker_root)
+
+    def test_worker_root_must_not_overlap_host_private_storage(self):
+        self.args['worker_root'] = self.trusted
+        with patch.object(h.shutil, 'which', return_value='/usr/bin/bwrap'):
+            with patch.object(h, 'require_worker_identity', return_value=self.trusted):
+                with self.assertRaisesRegex(h.Refused, 'overlaps'):
+                    h.run_worker(**self.args)
 
     def test_no_shell_worker_command(self):
         with self.assertRaisesRegex(h.Refused, 'Worker executable'):

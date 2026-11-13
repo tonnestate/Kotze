@@ -21,10 +21,17 @@ class ConfidentialOracleTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
-        self.trusted, self.oracle, self.candidate, self.scratch = (
-            root / 'trusted', root / 'trusted/oracle', root / 'candidate', root / 'scratch')
-        for path in (self.trusted, self.oracle, self.candidate, self.scratch):
+        self.trusted, self.oracle, self.candidate, self.scratch, self.worker_root = (
+            root / 'trusted', root / 'trusted/oracle', root / 'candidate',
+            root / 'scratch', root / 'worker-root')
+        for path in (self.trusted, self.oracle, self.candidate, self.scratch, self.worker_root):
             path.mkdir(mode=0o700)
+        self.identity_patch = patch.object(cg.hc, 'require_worker_identity', return_value=self.worker_root)
+        self.chown_patch = patch.object(cg.hc.os, 'chown')
+        self.identity_patch.start()
+        self.chown_patch.start()
+        self.addCleanup(self.identity_patch.stop)
+        self.addCleanup(self.chown_patch.stop)
         (self.candidate / 'main.py').write_text('print("candidate")\n')
         self.oracle_data = {'schema': 'kotze.oracle-cases.v1', 'cases': [
             {'id': 'zero', 'stdin_b64': b64(b'a\n'), 'stdout_b64': b64(b'A\n')},
@@ -38,7 +45,8 @@ class ConfidentialOracleTests(unittest.TestCase):
                          oracle=self.oracle, candidate=self.candidate,
                          scratch=self.scratch, receipts=self.receipts,
                          task_id='t', arm='SKILL',
-                         candidate_tree_sha256=sg.tree_digest(self.candidate))
+                         candidate_tree_sha256=sg.tree_digest(self.candidate),
+                         worker_root=self.worker_root, worker_uid=65534, worker_gid=65534)
 
     def write_oracle(self, *, protocol=cg.PROTOCOL):
         self.case_file.write_text(json.dumps(self.oracle_data))
@@ -59,6 +67,10 @@ class ConfidentialOracleTests(unittest.TestCase):
             pid = 11111
             def __init__(self, command, **kw):
                 invocations.append(command)
+                assert kw['user'] == 65534
+                assert kw['group'] == 65534
+                assert kw['extra_groups'] == []
+                assert 'KOTZE_PRIVATE_CANARY' not in kw['env']
                 assert '--unshare-all' in command
                 assert '--unshare-user' in command
                 assert '--unshare-net' in command
@@ -154,6 +166,23 @@ class ConfidentialOracleTests(unittest.TestCase):
         with patch.object(cg.shutil, 'which', return_value='/usr/bin/bwrap'):
             with self.assertRaisesRegex(sg.ContractError, 'Duplicate'):
                 cg.grade(**self.args)
+
+    def test_identity_required_before_any_case(self):
+        self.identity_patch.stop()
+        with patch.object(cg.hc.os, 'geteuid', return_value=1000):
+            with patch.object(cg.shutil, 'which', return_value='/usr/bin/bwrap'):
+                with self.assertRaisesRegex(cg.hc.Refused, 'requires Linux root'):
+                    cg.grade(**self.args)
+        self.identity_patch.start()
+
+    def test_worker_storage_overlap_denied(self):
+        self.args['worker_root'] = self.trusted
+        self.identity_patch.stop()
+        with patch.object(cg.hc, 'require_worker_identity', return_value=self.trusted):
+            with patch.object(cg.shutil, 'which', return_value='/usr/bin/bwrap'):
+                with self.assertRaisesRegex(sg.ContractError, 'overlaps'):
+                    cg.grade(**self.args)
+        self.identity_patch.start()
 
     def test_symlink_in_candidate_refused(self):
         (self.candidate / 'escape').symlink_to(self.oracle)

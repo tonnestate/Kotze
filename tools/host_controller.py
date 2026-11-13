@@ -7,6 +7,7 @@ mandatory. The worker runs in a separate mount/network/PID/user namespace.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -133,6 +134,45 @@ def strip_protected(root: Path, paths: set[Path]) -> None:
             raise Refused('Worker shadowed a protected path with a directory')
 
 
+def require_worker_identity(worker_uid: int, worker_gid: int, worker_root: Path) -> Path:
+    """Require an OS-enforced distinct host UID, not only a user namespace UID map."""
+    if sys.platform != 'linux' or os.geteuid() != 0:
+        raise Refused('Host runner requires Linux root for explicit worker UID/GID drop')
+    if (type(worker_uid) is not int or worker_uid <= 0
+            or type(worker_gid) is not int or worker_gid <= 0):
+        raise Refused('Worker UID/GID must be explicit positive non-root integers')
+    root = strict_dir(worker_root)
+    st = root.stat()
+    # Root owns the parent: the worker may traverse but cannot list, rename or
+    # replace host-created stage entries. The dedicated worker group has +x only.
+    if (st.st_uid != os.geteuid() or st.st_gid != worker_gid
+            or stat.S_IMODE(st.st_mode) != 0o710):
+        raise Refused('Worker staging root must be host-owned, worker-group traversable (0710)')
+    return root
+
+
+@contextmanager
+def worker_stage(source: Path, worker_root: Path, worker_uid: int,
+                 worker_gid: int, excluded: set[Path]):
+    """Copy untrusted data into a separate worker-owned stage, never host-private scratch.
+
+    The worker may modify this tree; it is NOT an immutable attested snapshot.
+    """
+    with tempfile.TemporaryDirectory(prefix='.kotze-worker-', dir=worker_root) as tmp:
+        stage = Path(tmp)
+        work = stage / 'work'
+        work.mkdir(mode=0o700)
+        clone_tree(source, work, excluded)
+        # chown children before exposing ancestor traversal to the worker.
+        for entry in sorted(work.rglob('*'), key=lambda p: len(p.parts), reverse=True):
+            if entry.is_symlink() or not (entry.is_dir() or entry.is_file()):
+                raise Refused('Staged special file or symlink denied')
+            os.chown(entry, worker_uid, worker_gid, follow_symlinks=False)
+        os.chown(work, worker_uid, worker_gid)
+        os.chown(stage, worker_uid, worker_gid)
+        yield work
+
+
 def worker_command(bwrap: str, workspace: Path, argv: list[str]) -> list[str]:
     if not argv or any(not isinstance(s, str) or not s or '\x00' in s for s in argv):
         raise Refused('Worker must have a nonempty argument vector')
@@ -154,6 +194,7 @@ def worker_command(bwrap: str, workspace: Path, argv: list[str]) -> list[str]:
 def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
                source: Path, expected_source_sha256: str, scratch: Path,
                publish_parent: Path, output_name: str, argv: list[str],
+               worker_root: Path, worker_uid: int, worker_gid: int,
                timeout: int = 120) -> dict:
     if os.name != 'posix' or sys.platform != 'linux':
         raise Refused('Linux namespace sandbox required')
@@ -169,17 +210,18 @@ def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
     trusted = strict_dir(trusted, private=True)
     source, scratch, publish_parent = (strict_dir(source), strict_dir(scratch, private=True),
                                        strict_dir(publish_parent, private=True))
+    worker_root = require_worker_identity(worker_uid, worker_gid, worker_root)
     manifest_resolved = manifest.resolve(strict=True)
     if not within(manifest_resolved, trusted):
         raise Refused('Manifest must reside in host-only trusted root')
-    for path in (source, scratch, publish_parent):
+    for path in (source, scratch, publish_parent, worker_root):
         if within(path, trusted) or within(trusted, path):
             raise Refused('Trusted root overlaps any worker storage location')
-    if (source == scratch or within(source, scratch) or within(scratch, source)
-            or source == publish_parent or within(source, publish_parent)
-            or within(publish_parent, source) or scratch == publish_parent
-            or within(scratch, publish_parent) or within(publish_parent, scratch)):
-        raise Refused('Source, scratch and publication directories must not overlap')
+    roots = (source, scratch, publish_parent, worker_root)
+    for i, left in enumerate(roots):
+        for right in roots[i + 1:]:
+            if within(left, right) or within(right, left):
+                raise Refused('Source, scratch, publication and worker roots must not overlap')
     output = publish_parent / output_name
     if output.exists() or output.is_symlink():
         raise Refused('Output already exists')
@@ -187,33 +229,34 @@ def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
     source_sha = digest_tree(source)
     if source_sha != expected_source_sha256:
         raise Refused('Source tree hash differs from trusted pin')
-    with tempfile.TemporaryDirectory(prefix='.kotze-worker-', dir=scratch) as tmp:
-        workspace = Path(tmp) / 'work'
-        workspace.mkdir(mode=0o700)
-        clone_tree(source, workspace, excluded)
+    with worker_stage(source, worker_root, worker_uid, worker_gid, excluded) as workspace:
         if digest_tree(source) != source_sha:
             raise Refused('Source changed during staging')
         command = worker_command(bwrap, workspace, argv)
-        stdout = Path(tmp) / 'stdout'
-        stderr = Path(tmp) / 'stderr'
-        start = time.monotonic()
-        def limits() -> None:
-            resource.setrlimit(resource.RLIMIT_CPU, (2 * timeout, 2 * timeout))
-            resource.setrlimit(resource.RLIMIT_FSIZE, (1024 * 1024, 1024 * 1024))
-            resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
-            resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-        try:
-            with stdout.open('wb') as out, stderr.open('wb') as err:
-                proc = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
-                                        close_fds=True, start_new_session=True, preexec_fn=limits)
-                try:
-                    status = proc.wait(timeout=timeout)
-                except subprocess.TimeoutExpired:
-                    os.killpg(proc.pid, signal.SIGKILL)
-                    proc.wait()
-                    raise Refused('Worker timed out; no candidate published')
-        except OSError as exc:
-            raise Refused('Worker process or sandbox failed to start') from exc
+        with tempfile.TemporaryDirectory(prefix='.kotze-host-log-', dir=scratch) as logdir:
+            stdout = Path(logdir) / 'stdout'
+            stderr = Path(logdir) / 'stderr'
+            start = time.monotonic()
+            def limits() -> None:
+                resource.setrlimit(resource.RLIMIT_CPU, (2 * timeout, 2 * timeout))
+                resource.setrlimit(resource.RLIMIT_FSIZE, (1024 * 1024, 1024 * 1024))
+                resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
+                resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+            try:
+                with stdout.open('wb') as out, stderr.open('wb') as err:
+                    proc = subprocess.Popen(
+                        command, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
+                        close_fds=True, start_new_session=True, preexec_fn=limits,
+                        user=worker_uid, group=worker_gid, extra_groups=[],
+                        env={'PATH': '/usr/bin:/bin', 'HOME': '/tmp'})
+                    try:
+                        status = proc.wait(timeout=timeout)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                        proc.wait()
+                        raise Refused('Worker timed out; no candidate published')
+            except OSError as exc:
+                raise Refused('Worker process or sandbox failed to start') from exc
         if status != 0:
             raise Refused(f'Worker exited {status}; no candidate published')
         strip_protected(workspace, excluded)
@@ -233,15 +276,18 @@ def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
                 'manifest_sha256': manifest_sha, 'input_tree_sha256': source_sha,
                 'candidate_tree_sha256': candidate_sha, 'output': str(output),
                 'worker_exit_code': status, 'worker_elapsed_seconds': round(time.monotonic()-start, 6),
+                'worker_host_uid': worker_uid, 'worker_host_gid': worker_gid,
                 'verified': False, 'oracle_mounted': False}
 
 
 def main() -> int:
     p = argparse.ArgumentParser(description='KOTZE trusted worker host; does not verify outcomes')
-    for name in ('trusted', 'manifest', 'source', 'scratch', 'publish_parent'):
+    for name in ('trusted', 'manifest', 'source', 'scratch', 'publish_parent', 'worker_root'):
         p.add_argument('--' + name.replace('_', '-'), type=Path, required=True)
     for name in ('task_id', 'arm', 'expected_source_sha256', 'output_name'):
         p.add_argument('--' + name.replace('_', '-'), required=True)
+    p.add_argument('--worker-uid', type=int, required=True)
+    p.add_argument('--worker-gid', type=int, required=True)
     p.add_argument('--timeout', type=int, default=120)
     p.add_argument('argv', nargs=argparse.REMAINDER)
     a = vars(p.parse_args())

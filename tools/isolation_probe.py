@@ -64,7 +64,7 @@ for label in ('oracle', 'receipt', 'database', 'manifest'):
 checks['host_ledger_unwritable'] = cannot_write(c['paths']['receipt'])
 checks['host_env_absent'] = os.environ.get('KOTZE_PRIVATE_CANARY') is None
 try:
-    checks['host_env_proc_absent'] = c['secret'] not in pathlib.Path('/proc/self/environ').read_bytes().decode('utf-8', 'replace')
+    checks['host_env_proc_absent'] = b'KOTZE_PRIVATE_CANARY=' not in pathlib.Path('/proc/self/environ').read_bytes()
 except OSError:
     checks['host_env_proc_absent'] = False
 for name in ('net', 'pid', 'mnt', 'user'):
@@ -153,9 +153,13 @@ def run(*, worker_uid: int, worker_gid: int, scratch_root: Path,
             listener.bind(('127.0.0.1', 0))
             listener.listen(1)
             port = listener.getsockname()[1]
-            config = {'nonce': nonce, 'secret': canary, 'paths': files,
+            # Never reveal the secret in a stage file merely to test environment isolation.
+            config = {'nonce': nonce, 'paths': files,
                       'namespaces': namespaces, 'port': port}
-            (stage / 'probe-config.json').write_text(json.dumps(config))
+            config_bytes = json.dumps(config, sort_keys=True).encode('utf-8')
+            if canary.encode('ascii') in config_bytes or b'"secret"' in config_bytes:
+                raise Refused('Synthetic host canary leaked into probe configuration')
+            (stage / 'probe-config.json').write_bytes(config_bytes)
             (stage / 'probe.py').write_text(CHILD)
             for item in stage.iterdir():
                 item.chmod(0o444)
@@ -167,7 +171,8 @@ def run(*, worker_uid: int, worker_gid: int, scratch_root: Path,
                 p = subprocess.Popen(command, stdin=subprocess.DEVNULL,
                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                      user=worker_uid, group=worker_gid, extra_groups=[],
-                                     env={**os.environ, 'KOTZE_PRIVATE_CANARY': canary},
+                                     env={'PATH': '/usr/bin:/bin',
+                                          'KOTZE_PRIVATE_CANARY': canary},
                                      start_new_session=True, close_fds=True)
                 try:
                     stdout, stderr = p.communicate(timeout=12)

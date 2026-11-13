@@ -87,6 +87,44 @@ class LiveProbeContractTests(unittest.TestCase):
                               bwrap=root / 'nonexistent-bwrap')
                     spawn.assert_not_called()
 
+    def test_synthetic_canary_is_not_in_worker_visible_payload(self):
+        self.assertNotIn("c['secret']", p.CHILD)
+        self.assertIn("b'KOTZE_PRIVATE_CANARY='", p.CHILD)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            binary = Path('/usr/bin/true')
+            if not binary.is_file() or binary.stat().st_uid != 0:
+                self.skipTest('Root-owned system executable is required for mocked setup')
+            events = []
+            class FakeProcess:
+                returncode = 0
+                pid = 10001
+                def communicate(self, timeout=None):
+                    nonce = events[0]['nonce']
+                    response = {'schema': 'kotze.isolation-probe-child.v1',
+                                'nonce': nonce, 'checks': {key: True for key in p.CHECKS}}
+                    return json.dumps(response).encode('utf-8'), b''
+            def fake_spawn(command, **kw):
+                stage = Path(command[command.index('--bind') + 1])
+                cfg_bytes = (stage / 'probe-config.json').read_bytes()
+                cfg = json.loads(cfg_bytes)
+                canary = kw['env']['KOTZE_PRIVATE_CANARY']
+                self.assertNotIn('secret', cfg)
+                self.assertNotIn(canary.encode('ascii'), cfg_bytes)
+                self.assertNotIn(canary, (stage / 'probe.py').read_text())
+                self.assertNotIn(canary, repr(command))
+                self.assertEqual(set(kw['env']), {'PATH', 'KOTZE_PRIVATE_CANARY'})
+                self.assertEqual(kw['user'], 65534)
+                self.assertEqual(kw['group'], 65534)
+                events.append(cfg)
+                return FakeProcess()
+            with patch.object(p, 'assert_preflight', return_value=root):
+                with patch.object(p.subprocess, 'Popen', side_effect=fake_spawn):
+                    result = p.run(worker_uid=65534, worker_gid=65534,
+                                   scratch_root=root, bwrap=binary)
+            self.assertEqual(result['state'], 'PASS')
+            self.assertEqual(len(events), 1)
+
     def test_valid_evidence_contract_but_not_live_proof(self):
         record = dict(schema='kotze.isolation-probe-child.v1', nonce='nonce',
                       checks={name: True for name in p.CHECKS})

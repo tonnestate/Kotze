@@ -1,6 +1,6 @@
 # Live isolation acceptance — phase 1.9
 
-Status: **offline acceptance logic verified; live OS isolation not verified**. This acceptance probe is a deliberately separate, host-only diagnostic, not a production security attestation or a worker skill.
+Status: **offline acceptance logic verified; live OS isolation not verified**. Phase 2.0 repair: the synthetic canary is no longer serialized into the worker-visible probe configuration, and the regular worker/grader launchers now require an explicit distinct nonroot host UID/GID. See [Host Identity Repair](HOST_IDENTITY_REPAIR.md). This acceptance probe is a deliberately separate, host-only diagnostic, not a production security attestation or a worker skill.
 
 ## Newly discovered failure mode
 
@@ -38,4 +38,4 @@ python3 -m unittest discover -s tests -p 'test_isolation_probe.py' -v
 
 ## Still required before KOTZE/CherryMe integration
 
-The current worker host and confidential grader still run candidate processes under the calling OS user in their regular paths; a different worker OS identity is demonstrated **only by the live acceptance probe's privileged drop**, not yet enforced by the production host runner. Production deployment needs dedicated account separation and a host process/IPC security boundary, immutable and race-resistant candidate snapshot leases, cgroup caps, strict executable/dependency allowlists, a supported full coding-test protocol and authenticated receipts. A live passing probe, a C11 end-to-end exercise and independent adversarial review remain necessary. Keep PR draft, never certify a production worker from these offline tests.
+The worker host and confidential grader now request a distinct host OS UID/GID for every candidate subprocess, but real execution and kernel-enforced isolation have not yet been verified. Production deployment needs dedicated account separation and a host process/IPC security boundary, immutable and race-resistant candidate snapshot leases, cgroup caps, strict executable/dependency allowlists, a supported full coding-test protocol and authenticated receipts. A live passing probe, a C11 end-to-end exercise and independent adversarial review remain necessary. Keep PR draft, never certify a production worker from these offline tests.
