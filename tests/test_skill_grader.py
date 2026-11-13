@@ -93,19 +93,38 @@ class SkillGraderTests(unittest.TestCase):
             with self.assertRaises(g.ContractError):
                 g.relative_path("/etc/passwd")
 
-    def test_run_fails_closed_without_bwrap(self):
+    def test_legacy_grade_refused_even_when_bwrap_exists(self):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as d:
-            root=Path(d)
-            manifest,oracle=self.manifest(root,("a",))
-            candidate=root / "candidate"
+            root = Path(d)
+            manifest, oracle = self.manifest(root, ("a",))
+            candidate = root / "candidate"
             candidate.mkdir()
-            (candidate/"logic.py").write_text("print('hi')")
-            scratch=root / "scratch"
+            (candidate / "logic.py").write_text("print('hi')")
+            scratch = root / "scratch"
             scratch.mkdir()
-            with patch.object(g.shutil,"which",return_value=None):
-                with self.assertRaisesRegex(g.ContractError,"refusing unsandboxed"):
-                    g.grader_run(manifest,"a","BASE",candidate,oracle,root/"ledger.jsonl",scratch)
+            ledger = root / "ledger.jsonl"
+            # The old path used to mount /oracle into candidate execution.
+            # No runtime feature or valid binary may ever re-enable it.
+            with patch.object(g.shutil, "which", return_value="/bin/true"):
+                with patch.object(g.subprocess, "Popen") as spawn:
+                    with self.assertRaisesRegex(g.ContractError, "disabled"):
+                        g.grader_run(manifest, "a", "BASE", candidate,
+                                     oracle, ledger, scratch)
+                    spawn.assert_not_called()
+            self.assertFalse(ledger.exists())
+
+    def test_legacy_grade_refused_without_bwrap(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            manifest, oracle = self.manifest(root, ("a",))
+            candidate = root / "candidate"
+            candidate.mkdir()
+            with patch.object(g.shutil, "which", return_value=None):
+                with self.assertRaisesRegex(g.ContractError, "disabled"):
+                    g.grader_run(manifest, "a", "BASE", candidate,
+                                 oracle, root / "ledger.jsonl", root / "scratch")
 
     def test_receipt_append_rejects_symlinks_world_writable_and_hardlinks(self):
         import os
