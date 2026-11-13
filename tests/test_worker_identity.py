@@ -76,6 +76,20 @@ class WorkerIdentityTests(unittest.TestCase):
             with self.assertRaisesRegex(w.IdentityRefused, "real directory"):
                 w.require_traversable_scratch(root / "link")
 
+    def test_reject_absent_or_relative_bubblewrap(self):
+        for raw in (None, "", "bwrap", "/usr/bin/sh"):
+            with self.subTest(raw=raw), self.assertRaises(w.IdentityRefused):
+                w.require_trusted_bwrap(raw)
+
+    def test_reject_worker_writable_bubblewrap_ancestor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = Path(tmp) / "bwrap"
+            binary.write_text("#!/bin/sh\\n")
+            binary.chmod(0o755)
+            # Even a root-owned binary is unsafe under a world-writable /tmp.
+            with self.assertRaises(w.IdentityRefused):
+                w.require_trusted_bwrap(str(binary))
+
     def test_prepare_stage_rejects_symlink_without_chown(self):
         with tempfile.TemporaryDirectory() as tmp:
             stage = Path(tmp) / "stage"
