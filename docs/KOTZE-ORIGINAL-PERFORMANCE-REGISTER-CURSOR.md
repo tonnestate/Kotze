@@ -1,7 +1,7 @@
 # KOTZE Original — Performance, C11 Registry/Cursor and Concurrent Execution
 
 **Stand:** 13. November 2026  
-**Status:** Architekturentscheidung; kein implementiertes Register, kein implementierter Scheduler und keine gemessene Performanceverbesserung.  
+**Status:** erster nativer C11-Register-/Cursor-Slice als Quellcode vorhanden; noch kein Scheduler, keine Kompilierung, keine Tests und keine gemessene Performanceverbesserung.  
 **Scope:** Original-KOTZE für autonome Softwareentwicklung. Kein Import der StrawberryMe/OGI/AVCOS-Laufzeit, kein zweiter Organisations-/Capability-Katalog.  
 **Budget-Regel:** Keine Cloud-/Modellaufrufe, CI/Actions oder Benchmarkläufe durch diese Dokumentationsänderung.
 
@@ -30,7 +30,7 @@ Aus den früheren StrawberryMe-/OGI-Gesprächen ist die **Current / Future / Obs
 
 Das „Register“ bezeichnet hier eine **persistente, indizierte Sammlung von Zustands- und Architekturreferenzen**, nicht CPU-Prozessorregister. Ein Cursor ist ein expliziter positionsgebundener Snapshot/Handle, keine rohe Prozessadresse.
 
-### Ziel-Datenmodell (noch nicht umgesetzt)
+### Ziel-Datenmodell (teilweise umgesetzt)
 
 - **Durable source of truth:** bestehende SQLite-Works/Contracts/Events/Actions/Effects; Änderungen weiterhin ausschließlich über den autorisierten C11-Kern. Für neue Registerdaten ggf. zusätzliche indizierte Tabellen oder vorbereitete Views im selben Datenbestand, kein zweites Journal.
 - **Registereintrag:** `work_id`, `kind`, `object_key`, `version_digest`, `evidence_epoch`, `parent_ref`, `dependency_keys`, `observed_at`, `confidence_class`, `source_ref`; keine pauschal kopierten Code-Inhalte oder geheimen Testdaten.
@@ -91,4 +91,14 @@ Vorher/nachher für identische Daten und Budgets, getrennt nach Kaltstart/Warmst
 
 ## F. Verbindliche Nicht-Behauptungen
 
-Dieses Dokument beschreibt **nur die nächste Architektur- und Implementierungsplanung**. Im Originalbranch sind weder ein aktiver C11-Registerspeicher noch ein MAP_CURSOR noch eine native asynchrone Pipeline nachgewiesen. Frühere StrawberryMe-Design-/Testangaben beweisen keine bereits existierende KOTZE-Integration. Es wurden keine Performancewerte gemessen, kein Build und keine externen Tests ausgeführt.
+Dieses Dokument trennt den **jetzt als C11-Quellcode hinzugefügten Register-/Cursor-Slice** von weiterem Architekturziel. Der Register-Slice ist noch nicht kompiliert oder durch Ausführung nachgewiesen; MAP-Horizons H0–H4, Hot Cache und eine native asynchrone Pipeline sind weiterhin nicht implementiert. Frühere StrawberryMe-Design-/Testangaben beweisen keine bereits existierende KOTZE-Integration. Es wurden keine Performancewerte gemessen, kein Build und keine externen Tests ausgeführt.
+
+## G. C11-Implementierungsstand: erstes Register und Positionscursor
+
+Die neue Library `include/kotze_register.h` und `src/kotze_register.c` verwendet die **bereits vorhandene** KOTZE-SQLite-Datenbank. `kr_open` fordert die vorhandene `works`-Tabelle an und legt lediglich additive Tabellen an. `kr_put` erzeugt pro Arbeitsrevision und Objektkennung **unveränderliche** Referenzen (Art, Quellverweis, Versionsdigest, Evidenzepoch). `kr_link` erzeugt gerichtete und per Fremdschlüssel gebundene Beziehungen. Beide Operationen sind bei identischer Wiederholung idempotent; Änderungen derselben Kennung in derselben Revision werden abgewiesen.
+
+`kr_cursor_open` fixiert die Arbeitsrevision, Evidenzepoch und die pro Work geänderte Registergeneration. `kr_cursor_read` liest eine Position; `kr_cursor_edges` liest **maximal 64** gerichtete Nachbarn mit binärer Sortierung und keyset-basierter Fortsetzung. Jede Abfrage prüft Version und Generation **innerhalb derselben kurzen SQLite-Lesetransaktion**. Neue Registereinträge, Links oder Work-Ereignisse invalidieren alte Cursor ausdrücklich. Es gibt weder ungesicherte Zeiger auf SQLite-Puffer noch einen vollständigen Register-Dump.
+
+**Vorläufige Grenze:** Der Register-Write-API fehlt weiterhin die OS-basierte Authentifizierung des vertrauenswürdigen Hosts. Worker dürfen daher weder Registerdatei noch schreibfähige API erhalten. Das Register ist ein Index, keine unabhängige Oracle-/Verifikationsinstanz. Read-Handles sind pro Thread separat zu führen. SQLite-WAL unterstützt gleichzeitige Leser und genau einen jeweils aktiven Schreiber; es gibt noch keinen C11-Threadpool, keine adaptive Horizon-Erweiterung und keine gemessene Latenzverbesserung.
+
+`tests/test_register.c` enthält deterministische Testfälle für Idempotenz, Referenzintegrität, gerichtete Kanten, Keyset-Pagination, Generation-Konflikte, Versionswechsel und Neustart. **Nicht ausgeführt**; weder lokal noch über CI.
