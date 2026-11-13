@@ -107,5 +107,32 @@ class SkillGraderTests(unittest.TestCase):
                 with self.assertRaisesRegex(g.ContractError,"refusing unsandboxed"):
                     g.grader_run(manifest,"a","BASE",candidate,oracle,root/"ledger.jsonl",scratch)
 
+    def test_receipt_append_rejects_symlinks_world_writable_and_hardlinks(self):
+        import os
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            receipt = {"study_id": "study", "task_id": "task", "arm": "BASE"}
+            original = root / "ledger.jsonl"
+            original.write_text("")
+            original.chmod(0o600)
+
+            symlink = root / "link.jsonl"
+            symlink.symlink_to(original)
+            with self.assertRaises((OSError, g.ContractError)):
+                g.append_receipt(symlink, receipt)
+            self.assertEqual(original.read_text(), "")
+
+            original.chmod(0o666)
+            with self.assertRaisesRegex(g.ContractError, "private"):
+                g.append_receipt(original, receipt)
+            self.assertEqual(original.read_text(), "")
+
+            original.chmod(0o600)
+            hardlink = root / "hardlink.jsonl"
+            os.link(original, hardlink)
+            with self.assertRaisesRegex(g.ContractError, "private"):
+                g.append_receipt(original, receipt)
+            self.assertEqual(original.read_text(), "")
+
 if __name__ == "__main__":
     unittest.main()
