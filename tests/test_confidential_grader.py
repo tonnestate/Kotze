@@ -25,6 +25,16 @@ class ConfidentialOracleTests(unittest.TestCase):
             root / 'trusted', root / 'trusted/oracle', root / 'candidate', root / 'scratch')
         for path in (self.trusted, self.oracle, self.candidate, self.scratch):
             path.mkdir(mode=0o700)
+        self.scratch.chmod(0o711)
+        for name, result in (
+            ('require_worker_identity', (2077, 2077)),
+            ('worker_process_options', {'user': 2077, 'group': 2077, 'extra_groups': [],
+                                        'umask': 0o077, 'env': {'PATH': '/usr/bin:/bin'}}),
+            ('prepare_worker_stage', None),
+        ):
+            patcher = patch.object(cg.identity, name, return_value=result)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         (self.candidate / 'main.py').write_text('print("candidate")\n')
         self.oracle_data = {'schema': 'kotze.oracle-cases.v1', 'cases': [
             {'id': 'zero', 'stdin_b64': b64(b'a\n'), 'stdout_b64': b64(b'A\n')},
@@ -38,7 +48,8 @@ class ConfidentialOracleTests(unittest.TestCase):
                          oracle=self.oracle, candidate=self.candidate,
                          scratch=self.scratch, receipts=self.receipts,
                          task_id='t', arm='SKILL',
-                         candidate_tree_sha256=sg.tree_digest(self.candidate))
+                         candidate_tree_sha256=sg.tree_digest(self.candidate),
+                         worker_uid=2077, worker_gid=2077)
 
     def write_oracle(self, *, protocol=cg.PROTOCOL):
         self.case_file.write_text(json.dumps(self.oracle_data))
@@ -59,6 +70,10 @@ class ConfidentialOracleTests(unittest.TestCase):
             pid = 11111
             def __init__(self, command, **kw):
                 invocations.append(command)
+                assert kw.get('user') == 2077
+                assert kw.get('group') == 2077
+                assert kw.get('extra_groups') == []
+                assert 'HOST_SECRET' not in kw.get('env', {})
                 assert '--unshare-all' in command
                 assert '--unshare-user' in command
                 assert '--unshare-net' in command
