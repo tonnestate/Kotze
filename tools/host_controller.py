@@ -139,6 +139,7 @@ def worker_command(bwrap: str, workspace: Path, argv: list[str]) -> list[str]:
     if not argv[0].startswith(('/work/', '/usr/', '/bin/')) or '..' in Path(argv[0]).parts:
         raise Refused('Worker executable must be under /work, /usr or /bin')
     cmd = [bwrap, '--die-with-parent', '--new-session', '--unshare-all',
+           '--unshare-user', '--unshare-net', '--unshare-pid',
            '--clearenv', '--setenv', 'PATH', '/usr/bin:/bin',
            '--setenv', 'HOME', '/tmp', '--setenv', 'TMPDIR', '/tmp',
            '--setenv', 'PYTHONDONTWRITEBYTECODE', '1']
