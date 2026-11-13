@@ -48,4 +48,31 @@ int kd_status(kotze_dispatch_t *d, const char *action_id,
 /* No success verdict if any externally effectful operation is unresolved. */
 int kd_work_settled(kotze_dispatch_t *d, const char *work_id);
 
+
+/* Read-only inventory for trusted-host crash recovery. Unsettled includes
+ * PENDING, DISPATCHING, UNKNOWN and FAILED. A live DISPATCHING effect must not
+ * be assumed crashed merely because it appears in this list.
+ * The caller pages by the last returned action_id; pages are not a single
+ * cross-call SQLite snapshot. This API performs no execution or retry.
+ */
+typedef struct {
+    char action_id[129];
+    char work_id[129];
+    char effect_key[129];
+    char state[16];
+    int64_t token;
+} kd_recovery_item;
+
+int kd_list_unsettled(kotze_dispatch_t *d, const char *after_action_id,
+                      kd_recovery_item *items, unsigned capacity, unsigned *count);
+
+/* Trusted-host-only: after external proof that the previous dispatcher is
+ * stopped and cannot execute the claim, preserve its ambiguous effect as
+ * UNKNOWN. The claim token prevents a stale recovery call changing a newer
+ * attempt. This is NOT proof that the external operation did/did not occur.
+ * A crash evidence reference is persisted; never automatically retry UNKNOWN.
+ */
+int kd_mark_crashed(kotze_dispatch_t *d, const char *action_id, int64_t token,
+                    const char *crash_evidence_ref);
+
 #endif

@@ -6,6 +6,15 @@ The [external skill grader](docs/SKILL_GRADER.md) performs paired task evaluatio
 
 **This is not yet an autonomous coding agent.** No model calls, shell execution, source-code editing, process sandbox, real GitHub publishing, or independent verifier have been implemented. The CLI is a trusted local diagnostic interface, **not** an externally accessible API or a security boundary against malicious workers. A future host service must enforce caller identity and execute only journaled, authorized tool actions. In particular, passing `VERIFIER` on this CLI is *not* independent proof by itself.
 
+## Original KOTZE effect recovery (development branch)
+
+The original autonomous software-repair harness now has a native effect-outbox
+development path with crash-safe state bookkeeping. A bounded read-only inventory
+can list outstanding external actions, and an explicit trusted-host call can
+freeze a previously claimed action as UNKNOWN after a verified dispatcher crash.
+**No automatic retry, external execution, authenticated verifier or full agent
+runtime is implied.** See [effect dispatch and crash recovery](docs/EFFECT_DISPATCH.md).
+
 ## Local build (no GitHub Actions / hosted runners)
 
 Requirements: C11 compiler, SQLite3 development library, `make`.

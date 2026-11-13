@@ -261,3 +261,83 @@ int kd_work_settled(kotze_dispatch_t *d,const char *work_id){
     sqlite3_finalize(s);
     return active?KD_DENIED:KD_OK;
 }
+
+
+/* A bounded, deterministic recovery view. Returns no external side effect.
+ * The trusted host can obtain a stable page during a single SELECT; its
+ * orchestration must handle modifications between subsequent pages.
+ */
+int kd_list_unsettled(kotze_dispatch_t *d, const char *after_action_id,
+                      kd_recovery_item *items, unsigned capacity, unsigned *count) {
+    if(!d || !items || !count || capacity==0 || capacity>128 ||
+       (after_action_id && !valid(after_action_id,128)))
+        return KD_DENIED;
+    *count=0;
+    sqlite3_stmt *s=NULL;
+    int rc=query(d,&s,
+        "SELECT action_id,work_id,effect_key,state,token FROM effect_dispatch"
+        " WHERE state!='CONFIRMED' AND action_id > ?"
+        " ORDER BY action_id COLLATE BINARY LIMIT ?");
+    if(rc<0)return rc;
+    bind(s,1,after_action_id ? after_action_id : "");
+    sqlite3_bind_int(s,2,(int)capacity);
+    int step=SQLITE_DONE;
+    while(*count<capacity && (step=sqlite3_step(s))==SQLITE_ROW) {
+        kd_recovery_item *item=&items[*count];
+        memset(item,0,sizeof(*item));
+        snprintf(item->action_id,sizeof(item->action_id),"%s",
+                 (const char*)sqlite3_column_text(s,0));
+        snprintf(item->work_id,sizeof(item->work_id),"%s",
+                 (const char*)sqlite3_column_text(s,1));
+        snprintf(item->effect_key,sizeof(item->effect_key),"%s",
+                 (const char*)sqlite3_column_text(s,2));
+        snprintf(item->state,sizeof(item->state),"%s",
+                 (const char*)sqlite3_column_text(s,3));
+        item->token=sqlite3_column_int64(s,4);
+        (*count)++;
+    }
+    sqlite3_finalize(s);
+    if(step!=SQLITE_ROW && step!=SQLITE_DONE)
+        return fail(d,KD_ERROR,sqlite3_errmsg(d->db));
+    return KD_OK;
+}
+
+int kd_mark_crashed(kotze_dispatch_t *d, const char *id, int64_t token,
+                    const char *crash_evidence_ref) {
+    if(!d || !valid(id,128) || token<1 || !valid(crash_evidence_ref,512))
+        return KD_DENIED;
+    if(tx(d)<0)return KD_ERROR;
+    sqlite3_stmt *s=NULL;
+    int rc=query(d,&s,
+        "SELECT state,token,receipt_ref FROM effect_dispatch WHERE action_id=?");
+    if(rc<0)return finish_tx(d,rc);
+    bind(s,1,id);
+    int step=sqlite3_step(s);
+    if(step!=SQLITE_ROW) {
+        sqlite3_finalize(s);
+        return finish_tx(d,fail(d,step==SQLITE_DONE?KD_DENIED:KD_ERROR,
+            step==SQLITE_DONE?"unknown crash-recovery action":sqlite3_errmsg(d->db)));
+    }
+    int64_t current=sqlite3_column_int64(s,1);
+    int repeat=current==token &&
+        eq(sqlite3_column_text(s,0),"UNKNOWN") &&
+        eq(sqlite3_column_text(s,2),crash_evidence_ref);
+    int allowed=current==token &&
+        eq(sqlite3_column_text(s,0),"DISPATCHING");
+    sqlite3_finalize(s);
+    if(!allowed)
+        return finish_tx(d,repeat?KD_REPLAY:
+            fail(d,KD_CONFLICT,"claim is not dispatching at the expected token"));
+    rc=query(d,&s,
+        "UPDATE effect_dispatch SET state='UNKNOWN',receipt_ref=?"
+        " WHERE action_id=? AND token=? AND state='DISPATCHING'");
+    if(rc<0)return finish_tx(d,rc);
+    bind(s,1,crash_evidence_ref);bind(s,2,id);
+    sqlite3_bind_int64(s,3,token);
+    rc=step_done(d,s);
+    if(rc<0)return finish_tx(d,rc);
+    if(sqlite3_changes(d->db)!=1)
+        return finish_tx(d,fail(d,KD_CONFLICT,"concurrent recovery state changed"));
+    rc=record_change(d,id,token,"CRASHED_UNKNOWN",crash_evidence_ref);
+    return finish_tx(d,rc);
+}

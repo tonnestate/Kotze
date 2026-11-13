@@ -85,3 +85,33 @@ DELIVERY_CONFIRMED is blocked until the remote effect is reconciled.
 
 This does **not** imply remote exactly-once delivery without a provider-level
 idempotency key or a trustworthy remote existence check.
+
+
+## Restart inventory and explicit crashed-claim capture
+
+A native recovery API now makes unresolved effects observable without replaying
+them:
+
+- `kd_list_unsettled` pages up to 128 records per read by stable action ID,
+  returning action ID, work ID, effect key, status and fencing token. It includes
+  PENDING, DISPATCHING, UNKNOWN and FAILED records and excludes CONFIRMED ones.
+  Pagination is not a cross-call snapshot; the trusted host must tolerate concurrent
+  state changes.
+- `kd_mark_crashed` transitions exactly one DISPATCHING claim at the specified
+  fencing token to UNKNOWN. It appends `CRASHED_UNKNOWN` and the caller-supplied
+  incident receipt to the immutable transition history. Exact repeated calls are
+  idempotent; stale tokens or different receipts fail.
+- This action is **explicit**, never an automatic sweep on `kd_open`: a live
+  dispatcher could still be processing an external effect. The trusted host must
+  establish that previous dispatch authority has ended before marking it crashed.
+  A process PID alone is not an external-operation absence proof.
+- UNKNOWN is never automatically re-dispatched. A separate reliable observation
+  of the remote outcome must call `kd_reconcile`. A network timeout or process
+  restart is not evidence that the effect did not occur.
+
+Tests in `tests/test_dispatch.c` now include recovery inventory pagination,
+reopen with DISPATCHING, crash marking, replay/idempotency and stale fencing.
+**These additions have not been compiled or executed.**
+
+This remains a native control-plane function, not a complete trusted host,
+authenticated OS isolation, automatically launched model, or remote executor.

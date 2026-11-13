@@ -20,7 +20,8 @@ int main(void){
         "INSERT INTO works VALUES('work-1','REPAIRING','NONE');"
         "INSERT INTO actions VALUES('a1','work-1','NETWORK','RESERVED','');"
         "INSERT INTO actions VALUES('a2','work-1','WRITE','RESERVED','');"
-        "INSERT INTO actions VALUES('a3','work-1','READ','RESERVED','');",
+        "INSERT INTO actions VALUES('a3','work-1','READ','RESERVED','');"
+        "INSERT INTO actions VALUES('a4','work-1','NETWORK','RESERVED','');",
         NULL,NULL,NULL)==SQLITE_OK);
     sqlite3_close(db);
     kotze_dispatch_t *d=NULL;
@@ -61,6 +62,44 @@ int main(void){
     CHECK(kd_claim(d,"a2",&token),KD_OK);
     CHECK(kd_finish(d,"a2",token,"FAILED","no-effect-proof"),KD_OK);
     CHECK(kd_work_settled(d,"work-1"),KD_DENIED);
+
+    /* Crash inventory and explicit orphan recovery. The host, not this API,
+     * is responsible for proving that the old worker can no longer dispatch.
+     */
+    CHECK(kd_reserve(d,"a4","effect-4"),KD_OK);
+    CHECK(kd_claim(d,"a4",&token),KD_OK);
+    assert(token==1);
+    kd_close(d); /* simulated process restart; no external command executed */
+    CHECK(kd_open(&d,file),KD_OK);
+    kd_recovery_item items[2];
+    unsigned found=0;
+    CHECK(kd_list_unsettled(d,NULL,items,2,&found),KD_OK);
+    assert(found==2);
+    assert(strcmp(items[0].action_id,"a2")==0);
+    assert(strcmp(items[0].state,"FAILED")==0);
+    assert(strcmp(items[1].action_id,"a4")==0);
+    assert(strcmp(items[1].state,"DISPATCHING")==0);
+    CHECK(kd_list_unsettled(d,"a2",items,1,&found),KD_OK);
+    assert(found==1 && strcmp(items[0].action_id,"a4")==0);
+    CHECK(kd_list_unsettled(d,"a4",items,1,&found),KD_OK);
+    assert(found==0);
+    CHECK(kd_mark_crashed(d,"a4",2,"verified-host-exit"),KD_CONFLICT);
+    CHECK(kd_mark_crashed(d,"a4",1,"verified-host-exit"),KD_OK);
+    CHECK(kd_mark_crashed(d,"a4",1,"verified-host-exit"),KD_REPLAY);
+    CHECK(kd_mark_crashed(d,"a4",1,"different-proof"),KD_CONFLICT);
+    CHECK(kd_claim(d,"a4",&token),KD_DENIED);
+    CHECK(kd_status(d,"a4",state,sizeof(state),&token),KD_OK);
+    assert(strcmp(state,"UNKNOWN")==0 && token==1);
+    CHECK(kd_list_unsettled(d,"a2",items,1,&found),KD_OK);
+    assert(found==1 && strcmp(items[0].state,"UNKNOWN")==0);
+    CHECK(kd_reconcile(d,"a4","NOT_EXECUTED","remote-absence-proof"),KD_OK);
+    CHECK(kd_claim(d,"a4",&token),KD_OK);
+    assert(token==2);
+    CHECK(kd_mark_crashed(d,"a4",1,"stale-host"),KD_CONFLICT);
+    CHECK(kd_finish(d,"a4",token,"CONFIRMED","remote-effect-observed"),KD_OK);
+    CHECK(kd_list_unsettled(d,"a2",items,1,&found),KD_OK);
+    assert(found==0);
+
     kd_close(d);
     assert(sqlite3_open(file,&db)==SQLITE_OK);
     sqlite3_stmt *s=NULL;
