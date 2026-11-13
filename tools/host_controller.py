@@ -7,6 +7,8 @@ mandatory. The worker runs in a separate mount/network/PID/user namespace.
 from __future__ import annotations
 
 import argparse
+import ctypes
+import errno
 import hashlib
 import json
 import os
@@ -19,6 +21,8 @@ import subprocess
 import sys
 import tempfile
 import time
+
+import secure_snapshot
 
 SCHEMA = 'kotze.worker-stage.v1'
 STUDY_SCHEMA = 'kotze.skill-study.v1'
@@ -143,49 +147,48 @@ def protected_paths(manifest: Path, task_id: str) -> tuple[dict, dict, str, set[
 
 
 def digest_tree(root: Path) -> str:
-    """Identical digest format to skill_grader.tree_digest, without importing a grader into the worker."""
-    if root.is_symlink() or not root.is_dir():
-        raise Refused('Invalid source tree')
-    hasher = hashlib.sha256()
-    count = total = 0
-    for path in sorted(root.rglob('*')):
-        rel = path.relative_to(root)
-        if '.git' in rel.parts:
-            continue
-        st = path.lstat()
-        if stat.S_ISDIR(st.st_mode):
-            continue
-        if not stat.S_ISREG(st.st_mode):
-            raise Refused(f'Symlink or special file denied: {rel}')
-        count += 1
-        total += st.st_size
-        if count > MAX_FILES or st.st_size > MAX_FILE_BYTES or total > MAX_TOTAL_BYTES:
-            raise Refused('Source exceeds bounded policy')
-        contents = path.read_bytes()
-        hasher.update(str(rel).encode('utf-8'))
-        hasher.update(b'\x00')
-        hasher.update(len(contents).to_bytes(8, 'big'))
-        hasher.update(contents)
-    return hasher.hexdigest()
+    """Host-only nofollow digest anchored to opened directory fds."""
+    try:
+        return secure_snapshot.tree(root)
+    except secure_snapshot.SnapshotError as exc:
+        raise Refused(str(exc)) from exc
 
 
-def clone_tree(source: Path, destination: Path, excluded: set[Path]) -> None:
-    for entry in sorted(source.rglob('*')):
-        rel = entry.relative_to(source)
-        if '.git' in rel.parts or any(within(rel, item) for item in excluded):
-            continue
-        st = entry.lstat()
-        target = destination / rel
-        if stat.S_ISDIR(st.st_mode):
-            target.mkdir(parents=True, exist_ok=True)
-        elif stat.S_ISREG(st.st_mode):
-            target.parent.mkdir(parents=True, exist_ok=True)
-            # Never propagate suid/sgid or untrusted source permissions.
-            with entry.open('rb') as inp, target.open('xb') as out:
-                shutil.copyfileobj(inp, out)
-            target.chmod(0o755 if st.st_mode & 0o111 else 0o644)
-        else:
-            raise Refused(f'Special file or symlink denied: {rel}')
+def clone_tree(source: Path, destination: Path, excluded: set[Path], *, seal: bool = False) -> str:
+    """Stable nofollow copy; never publish a partial or inconsistent tree."""
+    try:
+        return secure_snapshot.tree(source, destination, excluded=frozenset(excluded), seal=seal)
+    except secure_snapshot.SnapshotError as exc:
+        raise Refused(str(exc)) from exc
+
+
+def publish_noreplace(source: Path, publish_parent: Path, output_name: str) -> None:
+    """Linux atomic no-clobber publication, including races with other host writers."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    src_dir = dst_dir = None
+    try:
+        src_dir = os.open(source.parent, flags)
+        dst_dir = os.open(publish_parent, flags)
+        libc = ctypes.CDLL(None, use_errno=True)
+        try:
+            rename = libc.renameat2
+        except AttributeError as exc:
+            raise Refused('renameat2(RENAME_NOREPLACE) unavailable: no fallback') from exc
+        rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+                           ctypes.c_char_p, ctypes.c_uint]
+        rename.restype = ctypes.c_int
+        if rename(src_dir, os.fsencode(source.name), dst_dir,
+                  os.fsencode(output_name), 1) != 0:
+            error = ctypes.get_errno()
+            if error == errno.EEXIST:
+                raise Refused('Publication already exists; no overwrite')
+            raise Refused(f'Atomic no-replace publication denied: errno={error}')
+        os.fsync(dst_dir)
+    finally:
+        if dst_dir is not None:
+            os.close(dst_dir)
+        if src_dir is not None:
+            os.close(src_dir)
 
 
 def strip_protected(root: Path, paths: set[Path]) -> None:
@@ -291,12 +294,12 @@ def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
         with tempfile.TemporaryDirectory(prefix='.kotze-publish-', dir=publish_parent) as staged:
             final = Path(staged) / 'candidate'
             final.mkdir(mode=0o700)
-            clone_tree(workspace, final, set())
-            if digest_tree(final) != candidate_sha:
+            sealed_sha = clone_tree(workspace, final, set(), seal=True)
+            if sealed_sha != candidate_sha or digest_tree(final) != candidate_sha:
                 raise Refused('Worker tree changed while sealing')
             if output.exists() or output.is_symlink():
                 raise Refused('Output was created concurrently')
-            os.rename(final, output)
+            publish_noreplace(final, publish_parent, output_name)
         return {'schema': SCHEMA, 'study_id': study.get('study_id'),
                 'task_id': task_id, 'arm': arm, 'base_sha': task.get('base_sha'),
                 'manifest_sha256': manifest_sha, 'input_tree_sha256': source_sha,
