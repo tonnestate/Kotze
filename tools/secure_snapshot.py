@@ -12,6 +12,8 @@ from pathlib import Path
 import stat
 
 MAX_FILES = 10000
+MAX_DIRECTORIES = 10000
+MAX_DEPTH = 64
 MAX_FILE_BYTES = 16 * 1024 * 1024
 MAX_TOTAL_BYTES = 128 * 1024 * 1024
 CHUNK = 128 * 1024
@@ -44,8 +46,8 @@ def _checked_open_file(parent_fd: int, name: str, expected: os.stat_result) -> i
 def _open_directory(path: Path) -> int:
     """Open every absolute parent component with O_NOFOLLOW, not just the leaf."""
     raw = os.fspath(path)
-    if not raw.startswith('/') or '\x00' in raw:
-        raise SnapshotError('Snapshot paths must be absolute and free of NUL')
+    if not raw.startswith('/') or '\x00' in raw or '..' in Path(raw).parts:
+        raise SnapshotError('Snapshot paths must be absolute, normalized and free of NUL')
     fd = os.open('/', DIR_FLAGS)
     try:
         for component in Path(raw).parts[1:]:
@@ -78,12 +80,17 @@ def tree(source: Path, destination: Path | None = None, *,
             if dst_stat.st_uid != os.geteuid() or stat.S_IMODE(dst_stat.st_mode) != 0o700:
                 raise SnapshotError('Destination must be private (0700) and host-owned')
         hasher = hashlib.sha256()
-        files = total = 0
+        files = total = directories = 0
 
         def recurse(sfd: int, dfd: int | None, prefix: Path) -> None:
-            nonlocal files, total
+            nonlocal files, total, directories
+            directories += 1
+            if directories > MAX_DIRECTORIES or len(prefix.parts) > MAX_DEPTH:
+                raise SnapshotError('Snapshot directory count or nesting exceeds bounded policy')
             start = os.fstat(sfd)
             names = set(os.listdir(sfd))
+            if len(names) > MAX_FILES + MAX_DIRECTORIES:
+                raise SnapshotError('Snapshot directory entry count exceeds bounded policy')
             for name in sorted(names):
                 if name == '.git':
                     continue
