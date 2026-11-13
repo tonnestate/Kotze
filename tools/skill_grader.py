@@ -174,111 +174,18 @@ def append_receipt(path: Path, receipt: dict) -> None:
 
 def grader_run(manifest: Path, task_id: str, arm: str, candidate: Path, oracle: Path,
                receipts: Path, scratch_root: Path) -> dict:
-    m, digest = load_study(manifest)
-    task = task_of(m, task_id)
-    if arm not in ARMS:
-        raise ContractError("Invalid arm")
-    if shutil.which("bwrap") is None:
-        raise ContractError("bubblewrap absent: refusing unsandboxed execution")
-    for root in (candidate, oracle, scratch_root, receipts.parent, manifest.parent):
-        if not root.exists() or root.is_symlink():
-            raise ContractError("Missing or symlinked trusted path")
-    c, o, scratch = candidate.resolve(strict=True), oracle.resolve(strict=True), scratch_root.resolve(strict=True)
-    if c == o or under(c,o) or under(o,c) or under(scratch,c) or under(scratch,o):
-        raise ContractError("Worker and oracle/scratch directories overlap")
-    if under(receipts.resolve(), c) or under(manifest.resolve(), c):
-        raise ContractError("Trusted study or receipts are inside the worker workspace")
-    oracle_hash = tree_digest(o)
-    if oracle_hash != task["oracle_sha256"]:
-        raise ContractError("Sealed oracle hash mismatch: refusing grade")
-    candidate_hash = tree_digest(c)
-    for p in task["protected_paths"]:
-        src = o / relative_path(p)
-        if not src.is_file() or src.is_symlink():
-            raise ContractError(f"Sealed test missing or not regular: {p}")
-    with tempfile.TemporaryDirectory(prefix="kotze-grade-", dir=scratch) as tmp:
-        workspace = Path(tmp) / "work"
-        workspace.mkdir(mode=0o700)
-        # Copy only approved regular source files; reject all symlinks and special nodes.
-        for source in sorted(c.rglob("*")):
-            rel = source.relative_to(c)
-            if ".git" in rel.parts:
-                continue
-            mode = source.lstat().st_mode
-            dst = workspace / rel
-            if stat.S_ISDIR(mode):
-                dst.mkdir(parents=True, exist_ok=True)
-            elif stat.S_ISREG(mode):
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(source, dst)
-            else:
-                raise ContractError("Untrusted symlink/special file denied")
-        if tree_digest(workspace) != candidate_hash:
-            raise ContractError("Candidate changed during trusted snapshot: refusing grade")
-        mounts = []
-        for p in task["protected_paths"]:
-            src = o / relative_path(p)
-            dest = workspace / relative_path(p)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            # Restore trusted original after copying an agent-modified candidate.
-            if dest.exists():
-                if not dest.is_file():
-                    raise ContractError("Protected path shadowed by directory")
-                dest.unlink()
-            shutil.copyfile(src, dest)
-            mounts += ["--ro-bind", str(src), "/work/" + p]
-        if tree_digest(o) != oracle_hash:
-            raise ContractError("Oracle changed before test launch")
-        cmd = ["bwrap", "--die-with-parent", "--new-session", "--unshare-all", "--clearenv",
-               "--setenv", "PATH", "/usr/bin:/bin", "--setenv", "HOME", "/tmp",
-               "--setenv", "PYTHONDONTWRITEBYTECODE", "1"]
-        for p in ("/usr", "/bin", "/lib", "/lib64"):
-            if os.path.exists(p):
-                cmd += ["--ro-bind", p, p]
-        cmd += ["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
-                "--bind", str(workspace), "/work", "--ro-bind", str(o), "/oracle"]
-        cmd += mounts + ["--chdir", "/work", "--"] + task["runner"]
-        stdout_path = Path(tmp) / "stdout"
-        stderr_path = Path(tmp) / "stderr"
-        start = time.monotonic()
-        state, reason, exit_code = "INCONCLUSIVE", "UNAVAILABLE", None
-        def limits():
-            resource.setrlimit(resource.RLIMIT_FSIZE, (8 * 1024 * 1024, 8 * 1024 * 1024))
-            resource.setrlimit(resource.RLIMIT_CPU, (2 * task.get("timeout_seconds", 60), 2 * task.get("timeout_seconds", 60)))
-        try:
-            with stdout_path.open("wb") as out, stderr_path.open("wb") as err:
-                process = subprocess.Popen(cmd, stdout=out, stderr=err, start_new_session=True, close_fds=True, preexec_fn=limits)
-                try:
-                    exit_code = process.wait(timeout=task.get("timeout_seconds", 60))
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait()
-                    reason = "TIMEOUT"
-            if exit_code is not None:
-                state = "PASS" if exit_code == 0 else "FAIL"
-                reason = "TRUSTED_RUNNER_EXIT"
-                # bubblewrap itself can fail before starting the test. Do not call it a failing test.
-                if exit_code in (125, 126, 127):
-                    state, reason = "INCONCLUSIVE", "SANDBOX_OR_COMMAND_FAILURE"
-        except (OSError, ValueError) as exc:
-            reason = "GRADER_RUNTIME_FAILURE_" + type(exc).__name__
-        elapsed = round(time.monotonic() - start, 6)
-        if tree_digest(o) != oracle_hash:
-            state, reason = "INCONCLUSIVE", "ORACLE_CHANGED_DURING_GRADE"
-        receipt = {
-            "schema": RECEIPT_SCHEMA, "study_id": m["study_id"], "manifest_sha256": digest,
-            "task_id": task_id, "arm": arm, "base_sha": task["base_sha"],
-            "candidate_tree_sha256": candidate_hash, "oracle_sha256": oracle_hash,
-            "state": state, "reason": reason, "exit_code": exit_code,
-            "elapsed_seconds": elapsed, "sandbox": "linux-bubblewrap-unshare-all",
-            "stdout_sha256": sha(stdout_path.read_bytes()) if stdout_path.exists() else None,
-            "stderr_sha256": sha(stderr_path.read_bytes()) if stderr_path.exists() else None,
-            "stdout_tail": stdout_path.read_bytes()[-MAX_OUTPUT_BYTES:].decode("utf-8", "replace") if stdout_path.exists() else "",
-            "stderr_tail": stderr_path.read_bytes()[-MAX_OUTPUT_BYTES:].decode("utf-8", "replace") if stderr_path.exists() else "",
-            "independent_execution_attestation": "TRUSTED_HOST_CONFIGURATION_REQUIRED"
-        }
-        append_receipt(receipts, receipt)
-        return receipt
+    """Deprecated legacy endpoint: never execute hidden tests inside candidate namespace.
+
+    The old implementation mounted the entire host oracle at /oracle. Read-only
+    mounts prevent writes, not reads. C11 already rejects these receipts;
+    disabling execution prevents inadvertent confidentiality loss at source.
+    Existing caller signature is retained to produce a stable fail-closed error.
+    """
+    raise ContractError(
+        "Legacy oracle-mounted grading is disabled: hidden tests would be "
+        "exposed to candidate code. Use tools/confidential_grader.py with "
+        "host-oracle-stdin-v1 for supported deterministic tasks."
+    )
 
 
 def exact_mcnemar(b: int, c: int) -> float:
@@ -375,7 +282,7 @@ def analyze(manifest: Path, receipts: Path, repetitions: int = 4000) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser(description="External Zero-Trust skill grading and paired statistical analysis")
     sub = ap.add_subparsers(dest="command", required=True)
-    gr = sub.add_parser("grade", help="Run frozen external grader in bwrap (fail closed)")
+    gr = sub.add_parser("grade", help="DISABLED legacy oracle-mounted grader (always refuses)")
     for name in ("manifest", "candidate", "oracle", "receipts", "scratch_root"):
         gr.add_argument("--" + name.replace("_", "-"), required=True, type=Path)
     gr.add_argument("--task", required=True)
