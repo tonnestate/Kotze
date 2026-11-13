@@ -136,6 +136,18 @@ class SecureSnapshotTests(unittest.TestCase):
             with self.assertRaisesRegex(ss.SnapshotError, 'changed'):
                 ss.tree(self.source)
 
+    def test_refuse_parent_traversal(self):
+        with self.assertRaisesRegex(ss.SnapshotError, 'normalized'):
+            ss.tree(self.source / '..' / 'source')
+
+    def test_refuse_excessive_directory_nesting(self):
+        cursor = self.source
+        for i in range(ss.MAX_DEPTH + 2):
+            cursor = cursor / 'd'
+            cursor.mkdir()
+        with self.assertRaisesRegex(ss.SnapshotError, 'nesting'):
+            ss.tree(self.source)
+
     def test_refuse_relative_path(self):
         with self.assertRaisesRegex(ss.SnapshotError, 'absolute'):
             ss.tree(Path('relative'))
