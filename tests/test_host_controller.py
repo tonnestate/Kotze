@@ -44,6 +44,9 @@ class HostControllerTests(unittest.TestCase):
         def fake_spawn(cmd, **kwargs):
             events.append(cmd)
             self.assertIn('--unshare-all', cmd)
+            self.assertIn('--unshare-user', cmd)
+            self.assertIn('--unshare-net', cmd)
+            self.assertIn('--unshare-pid', cmd)
             self.assertIn('--clearenv', cmd)
             self.assertNotIn('--share-net', cmd)
             self.assertNotIn('--ro-bind-try', cmd)
