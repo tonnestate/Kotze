@@ -140,20 +140,34 @@ def task_of(m: dict, task_id: str) -> dict:
 
 
 def append_receipt(path: Path, receipt: dict) -> None:
-    """Trusted-host append-only logical record. FS permissions provide the trust boundary."""
+    """Append once through a *single locked inode*, refusing unsafe ledger paths.
+
+    This enforces local file integrity, not worker/host authentication.
+    The host must own the directory, process and trusted receipt writer.
+    """
     import fcntl
-    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
-    with os.fdopen(fd, "ab", buffering=0) as out:
+    flags = (os.O_RDWR | os.O_APPEND | os.O_CREAT
+             | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0))
+    fd = os.open(path, flags, 0o600)
+    with os.fdopen(fd, "r+b", buffering=0) as out:
         fcntl.flock(out.fileno(), fcntl.LOCK_EX)
-        # Deny conflicting reruns, which could permit selecting favorable results.
-        with path.open("rb") as previous:
-            for line in previous:
-                try:
-                    r = json.loads(line)
-                except (ValueError, TypeError):
-                    raise ContractError("Corrupt prior receipt ledger")
-                if r.get("study_id") == receipt["study_id"] and r.get("task_id") == receipt["task_id"] and r.get("arm") == receipt["arm"]:
-                    raise ContractError("Duplicate task-arm grade denied")
+        st = os.fstat(out.fileno())
+        if (not stat.S_ISREG(st.st_mode) or st.st_nlink != 1
+                or st.st_uid != os.geteuid() or st.st_mode & 0o077):
+            raise ContractError("Receipt ledger must be private, regular and exclusively host-owned")
+        # Read from the same locked inode we will append to: never reopen by path.
+        out.seek(0)
+        for line in out:
+            try:
+                r = json.loads(line)
+            except (ValueError, TypeError):
+                raise ContractError("Corrupt prior receipt ledger")
+            if not isinstance(r, dict):
+                raise ContractError("Non-object prior receipt record")
+            if (r.get("study_id") == receipt["study_id"]
+                    and r.get("task_id") == receipt["task_id"]
+                    and r.get("arm") == receipt["arm"]):
+                raise ContractError("Duplicate task-arm grade denied")
         out.write(canonical(receipt) + b"\n")
         os.fsync(out.fileno())
 
