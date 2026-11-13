@@ -28,3 +28,7 @@ All state changes are transactional SQLite WAL writes and indexed lookups. No mo
 Neither this C11 API nor the earlier `kotze-probe` binary authenticates a remote worker or provides complete namespace/mount/network sandboxing. The privileged trusted host must never run the Git subprocess using its database-owning credentials. The next implementation must connect an authorized claim to a separately provisioned worker identity with a protected result channel, observed output hashing, and correct crash handling.
 
 The added deterministic `tests/test_probe_bridge.c` covers fingerprint/env mismatch, replay, fencing, atomic finish, bypass rejection, restart, UNKNOWN and recovery listing. **Tests were authored but not executed.**
+
+## Stale outcome guard
+
+The FINISHED transition repeats the current-source/evidence-epoch admission check in its transaction before changing either ledger. A claim started before a work revision/evidence change cannot become a current completed diagnostic. It remains DISPATCHING until explicit UNKNOWN disposition. A matching historical FINISHED replay stays idempotent without relabeling it as current evidence.

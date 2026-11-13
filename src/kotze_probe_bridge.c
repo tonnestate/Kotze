@@ -221,7 +221,7 @@ int kpb_finish(kotze_probe_bridge_t *p,const char *id,int64_t token,
     sqlite3_stmt *s=NULL;
     int rc=query(p,&s,
        "SELECT state,token,outcome,exit_code,elapsed_ms,output_bytes,"
-       "receipt_digest FROM probe_attempts WHERE action_id=?");
+       "receipt_digest,tool_id,environment_digest FROM probe_attempts WHERE action_id=?");
     if(rc<0)return finish_tx(p,rc);
     bind(s,1,id);
     int st=sqlite3_step(s);
@@ -234,9 +234,19 @@ int kpb_finish(kotze_probe_bridge_t *p,const char *id,int64_t token,
        &&sqlite3_column_int64(s,5)==bytes
        &&eq(sqlite3_column_text(s,6),digest);
     int allowed=current==token&&eq(sqlite3_column_text(s,0),"DISPATCHING");
+    char bound_tool[32],bound_env[129];
+    snprintf(bound_tool,sizeof(bound_tool),"%s",
+             (const char*)sqlite3_column_text(s,7));
+    snprintf(bound_env,sizeof(bound_env),"%s",
+             (const char*)sqlite3_column_text(s,8));
     sqlite3_finalize(s);
     if(!allowed)return finish_tx(p,replay?KPB_REPLAY:
         fail(p,KPB_CONFLICT,"not a live matching probe"));
+    /* A diagnostic completed against an obsolete source/evidence epoch must
+     * not be recorded as a current action. Preserve DISPATCHING for explicit
+     * stale/crash recovery; never silently rebind the observation. */
+    rc=admissible(p,id,bound_tool,bound_env);
+    if(rc<0)return finish_tx(p,rc);
     rc=query(p,&s,"UPDATE actions SET state='FINISHED',outcome_digest=?"
                   " WHERE action_id=? AND operation='READ' AND state='RESERVED'");
     if(rc<0)return finish_tx(p,rc);

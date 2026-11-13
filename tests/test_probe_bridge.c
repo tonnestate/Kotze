@@ -52,6 +52,17 @@ int main(void){
     assert(n==1&&!strcmp(page[0].state,"UNKNOWN"));
     assert(!strcmp(page[0].action_id,"a-diff"));
     OK(kpb_unsettled(p,"a-diff",page,2,&n));assert(n==0);
+    /* Old-version diagnostic is rejected after a work event. */
+    assert(kotze_admit_action(core,"work-b","a-stale","READ",
+           "probe:v1:git-status","sandbox-identity",0)==KOTZE_OK);
+    OK(kpb_reserve(p,"a-stale","git-status","sandbox-identity"));
+    OK(kpb_claim(p,"a-stale",&token));
+    assert(token==1);
+    kotze_event change={"work-b","ev-change","CONTRACT_VALID",
+        KOTZE_CONTROLLER,0,"contract-proof",NULL,NULL,NULL,NULL};
+    assert(kotze_apply_event(core,&change)==KOTZE_OK);
+    assert(kpb_finish(p,"a-stale",token,"EXITED",0,9,0,DIGEST)==KPB_CONFLICT);
+    OK(kpb_unknown(p,"a-stale",token,INCIDENT));
     kpb_close(p);kotze_close(core);
     unlink(path);
     char wal[4096],shm[4096];
