@@ -2,11 +2,13 @@
 
 The repository contains the first **C11/SQLite control-plane implementation** of KOTZE Harness. The library is language-agnostic and persists work identity, original requirements, event-driven finite-state transitions, repair candidates, verifier-bound outcome claims, enumerated hypotheses, action-budget reservations, anti-repeat decisions, and verified-success records.
 
+The [confidential host oracle driver](docs/CONFIDENTIAL_ORACLE.md) adds an opt-in deterministic stdin-to-stdout verification path. A private host retains expected results and runs candidate code without mounting the hidden oracle. The C11 receipt bridge now refuses legacy oracle-mounted receipts for verification transitions. Only mocked-process offline tests are available; real namespace isolation and authenticated host provenance remain unverified.
+
 The [trusted worker host](docs/HOST_WORKER_ISOLATION.md) now stages a pinned candidate in a network-disconnected bubblewrap worker namespace **without mounting the oracle, manifest, receipts, or C11 database**. It outputs an unverified candidate snapshot. Its 11 offline tests use mocked sandbox execution; real OS-isolation acceptance has not been run.
 
 The [trusted receipt bridge](docs/TRUSTED_RECEIPT_BRIDGE.md) binds external grader receipts to the current C11 work snapshot and revision, rejecting a model's unverified PASS claim. The native CLI is still not authenticated and full isolation is not claimed.
 
-The [external skill grader](docs/SKILL_GRADER.md) performs paired task evaluation outside the worker workspace using frozen read-only oracles and a fail-closed OS-sandbox requirement. It statistically compares BASE versus SKILL under matched tasks; it is not an authenticated production verifier.
+The legacy [external skill grader](docs/SKILL_GRADER.md) performs paired task evaluation outside the worker workspace using frozen read-only oracles and a fail-closed OS-sandbox requirement. It still mounts /oracle during candidate test execution and cannot certify confidential hidden tests. It statistically compares BASE versus SKILL under matched tasks; it is not an authenticated production verifier.
 
 The optional [Gemma worker adapter](docs/GEMMA_WORKER.md) binds local Ollama, Google's hosted Gemma 4 API, and OpenRouter's free Gemma 4 variants to the C11 MODEL-action reservation. Its responses are **unverified proposals**, not executed patches or grader receipts. Hosted calls require explicit domain-upload approval.
 

@@ -22,6 +22,12 @@ class VerificationBridgeTests(unittest.TestCase):
         self.oracle.mkdir()
         (self.candidate / "src.py").write_text("value = 42\n")
         (self.oracle / "test.py").write_text("assert True\n")
+        (self.oracle / "cases.json").write_text(json.dumps({
+            "schema": "kotze.oracle-cases.v1",
+            "cases": [
+                {"id": "first", "stdin_b64": "YQo=", "stdout_b64": "QQo="},
+                {"id": "second", "stdin_b64": "Ygo=", "stdout_b64": "Qgo="}
+            ]}))
         self.manifest, self.receipts, self.db, self.core = (
             p / x for x in ("study.json", "receipts.jsonl", "work.sqlite", "core"))
         self.core.write_text("trusted stub; not executed")
@@ -32,7 +38,8 @@ class VerificationBridgeTests(unittest.TestCase):
              "skill_version": "v1", "arms": ["BASE", "SKILL"], "seed": 9,
              "tasks": [{"task_id": "a", "base_sha": self.base,
                         "oracle_sha256": self.o_hash, "protected_paths": ["test.py"],
-                        "runner": ["/usr/bin/python3", "/oracle/test.py"]}]}
+                        "runner": ["/usr/bin/python3", "-B", "/work/src.py"],
+                        "case_protocol": "host-oracle-stdin-v1"}]}
         self.manifest.write_text(json.dumps(m))
         self.manifest_hash = g.load_study(self.manifest)[1]
         self.record = {"schema": g.RECEIPT_SCHEMA, "study_id": "s",
@@ -41,7 +48,9 @@ class VerificationBridgeTests(unittest.TestCase):
                        "oracle_sha256": self.o_hash, "candidate_tree_sha256": self.c_hash,
                        "state": "PASS", "reason": "TRUSTED_RUNNER_EXIT", "exit_code": 0,
                        "sandbox": "linux-bubblewrap-unshare-all",
-                       "independent_execution_attestation": "TRUSTED_HOST_CONFIGURATION_REQUIRED"}
+                       "independent_execution_attestation": "TRUSTED_HOST_CONFIGURATION_REQUIRED",
+                       "grader_protocol": "host-oracle-stdin-v1", "oracle_visibility": "host-only",
+                       "case_count": 2, "passed_cases": 2}
         self.save_receipt()
         with sqlite3.connect(self.db) as conn:
             conn.execute("CREATE TABLE works(id TEXT PRIMARY KEY,state TEXT,revision INTEGER,candidate_sha TEXT,oracle_hash TEXT,base_sha TEXT,verification_state TEXT)")
@@ -105,7 +114,8 @@ class VerificationBridgeTests(unittest.TestCase):
             ("FAIL", "TRUSTED_RUNNER_EXIT", 1, "VERIFY_FAIL"),
             ("INCONCLUSIVE", "TIMEOUT", None, "VERIFY_INCONCLUSIVE")
         ):
-            self.record.update(state=grader_state, reason=reason, exit_code=exit_code)
+            self.record.update(state=grader_state, reason=reason, exit_code=exit_code,
+                               passed_cases=0)
             self.save_receipt()
             with patch.object(b.subprocess, "run") as run:
                 with self.assertRaisesRegex(g.ContractError, "Native reducer refused"):
@@ -122,6 +132,14 @@ class VerificationBridgeTests(unittest.TestCase):
                      receipts=moved, candidate=self.candidate, oracle=self.oracle,
                      work_id="work", task_id="a", arm="SKILL", event_id="verify-a")
 
+
+    def test_sealed_oracle_case_count_mismatch_refused(self):
+        self.record.update(case_count=1, passed_cases=1)
+        self.save_receipt()
+        with patch.object(b.subprocess, "run") as run:
+            with self.assertRaisesRegex(g.ContractError, "case count differs"):
+                self.invoke()
+            run.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()

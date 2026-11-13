@@ -1,5 +1,8 @@
 # Trusted receipt bridge — phase 1.6
 
+> Phase 1.8 update: the C11 bridge now rejects all legacy /oracle-mounted grader receipts. Only tasks registered with case_protocol=host-oracle-stdin-v1 and matching host-private grader receipt fields are accepted for verify transitions. See [Confidential Oracle](CONFIDENTIAL_ORACLE.md). This does not establish host authentication.
+
+
 **Status: host-side adapter implemented; offline tests use a mocked native reducer.
 Not a production security boundary or a complete autonomous coding agent.**
 

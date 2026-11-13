@@ -16,6 +16,8 @@ import sys
 
 from skill_grader import (ARMS, ContractError, RECEIPT_SCHEMA, STATES, canonical,
                           load_study, sha, task_of, tree_digest, under)
+from receipt_contract import validate_confidential_receipt
+from confidential_grader import load_cases
 
 
 def trusted_file(path: Path) -> Path:
@@ -65,6 +67,12 @@ def verified_receipt(manifest: Path, receipts: Path, task_id: str, arm: str) -> 
             or r.get("sandbox") != "linux-bubblewrap-unshare-all"
             or r.get("independent_execution_attestation") != "TRUSTED_HOST_CONFIGURATION_REQUIRED"):
         raise ContractError("Receipt/manifest provenance mismatch")
+    # Legacy /oracle-mounted execution cannot certify KOTZE verification.
+    # Host-owned receipt files and process identity remain external trust requirements.
+    try:
+        validate_confidential_receipt(r, task)
+    except ValueError as exc:
+        raise ContractError(str(exc)) from exc
     if r["state"] == "PASS" and (r.get("reason") != "TRUSTED_RUNNER_EXIT" or type(r.get("exit_code")) is not int or r["exit_code"] != 0):
         raise ContractError("Invalid passing grader exit evidence")
     if r["state"] == "FAIL" and (r.get("reason") != "TRUSTED_RUNNER_EXIT" or type(r.get("exit_code")) is not int or r["exit_code"] in (0, 125, 126, 127)):
@@ -93,6 +101,8 @@ def bridge(*, db: Path, core: Path, manifest: Path, receipts: Path,
     r, task, _ = verified_receipt(manifest, receipts, task_id, arm)
     if tree_digest(oracle) != task["oracle_sha256"]:
         raise ContractError("Sealed oracle changed after grade")
+    if len(load_cases(oracle)) != r["case_count"]:
+        raise ContractError("Receipt case count differs from sealed private oracle")
     if tree_digest(candidate) != r["candidate_tree_sha256"]:
         raise ContractError("Candidate changed after external grade")
     state = snapshot(db, work_id)
