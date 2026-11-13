@@ -25,6 +25,13 @@ import time
 import host_controller as hc
 import skill_grader as sg
 
+def sealed_digest(root: Path) -> str:
+    try:
+        return hc.digest_tree(root)
+    except hc.Refused as exc:
+        raise sg.ContractError(str(exc)) from exc
+
+
 PROTOCOL = 'host-oracle-stdin-v1'
 MAX_CASES = 128
 MAX_CASE_BYTES = 65536
@@ -167,10 +174,10 @@ def grade(*, trusted: Path, manifest: Path, oracle: Path, candidate: Path,
         raise sg.ContractError('Task must explicitly opt into host-confidential protocol')
     protected = {sg.relative_path(p) for p in task['protected_paths']}
     sealed_candidate(candidate, protected)
-    oracle_hash = sg.tree_digest(oracle)
+    oracle_hash = sealed_digest(oracle)
     if oracle_hash != task['oracle_sha256']:
         raise sg.ContractError('Frozen host oracle digest mismatch')
-    candidate_hash = sg.tree_digest(candidate)
+    candidate_hash = sealed_digest(candidate)
     if candidate_hash != candidate_tree_sha256:
         raise sg.ContractError('Candidate does not match sealed pin')
     cases = load_cases(oracle)
@@ -197,7 +204,7 @@ def grade(*, trusted: Path, manifest: Path, oracle: Path, candidate: Path,
             reason = 'TRUSTED_RUNNER_EXIT' if state == 'FAIL' else 'HOST_TEST_INCONCLUSIVE'
             break
         passed += 1
-    if sg.tree_digest(candidate) != candidate_hash or sg.tree_digest(oracle) != oracle_hash:
+    if sealed_digest(candidate) != candidate_hash or sealed_digest(oracle) != oracle_hash:
         state, reason, exit_code = 'INCONCLUSIVE', 'TRUSTED_SNAPSHOT_CHANGED', None
     record = {
         'schema': sg.RECEIPT_SCHEMA, 'study_id': study['study_id'],
