@@ -35,6 +35,14 @@ class ConfidentialOracleTests(unittest.TestCase):
             patcher = patch.object(cg.identity, name, return_value=result)
             patcher.start()
             self.addCleanup(patcher.stop)
+        def fake_bwrap(raw):
+            if not raw:
+                raise cg.identity.IdentityRefused('Bubblewrap absent: unsandboxed execution is forbidden')
+            return '/usr/bin/bwrap'
+        patcher = patch.object(cg.identity, 'require_trusted_bwrap',
+                               side_effect=fake_bwrap)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         (self.candidate / 'main.py').write_text('print("candidate")\n')
         self.oracle_data = {'schema': 'kotze.oracle-cases.v1', 'cases': [
             {'id': 'zero', 'stdin_b64': b64(b'a\n'), 'stdout_b64': b64(b'A\n')},
@@ -114,7 +122,7 @@ class ConfidentialOracleTests(unittest.TestCase):
 
     def test_no_bwrap_refuses_without_receipt(self):
         with patch.object(cg.shutil, 'which', return_value=None):
-            with self.assertRaisesRegex(sg.ContractError, 'unsandboxed'):
+            with self.assertRaisesRegex(cg.identity.IdentityRefused, 'unsandboxed'):
                 cg.grade(**self.args)
         self.assertFalse(self.receipts.exists())
 
