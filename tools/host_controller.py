@@ -143,9 +143,11 @@ def require_worker_identity(worker_uid: int, worker_gid: int, worker_root: Path)
         raise Refused('Worker UID/GID must be explicit positive non-root integers')
     root = strict_dir(worker_root)
     st = root.stat()
-    if (st.st_uid != worker_uid or st.st_gid != worker_gid
-            or stat.S_IMODE(st.st_mode) != 0o700):
-        raise Refused('Worker staging root must be owned by the dedicated UID/GID (0700)')
+    # Root owns the parent: the worker may traverse but cannot list, rename or
+    # replace host-created stage entries. The dedicated worker group has +x only.
+    if (st.st_uid != os.geteuid() or st.st_gid != worker_gid
+            or stat.S_IMODE(st.st_mode) != 0o710):
+        raise Refused('Worker staging root must be host-owned, worker-group traversable (0710)')
     return root
 
 
