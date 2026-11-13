@@ -35,6 +35,12 @@ class NativeReceiptIntegrationTests(unittest.TestCase):
         self.oracle.mkdir()
         (self.candidate / "logic.py").write_text("def answer(): return 42\n")
         (self.oracle / "test.py").write_text("assert True\n")
+        (self.oracle / "cases.json").write_text(json.dumps({
+            "schema": "kotze.oracle-cases.v1",
+            "cases": [
+                {"id": "first", "stdin_b64": "YQo=", "stdout_b64": "QQo="},
+                {"id": "second", "stdin_b64": "Ygo=", "stdout_b64": "Qgo="}
+            ]}))
         self.c_hash = grader.tree_digest(self.candidate)
         self.o_hash = grader.tree_digest(self.oracle)
         self.base = "source-base"
@@ -45,7 +51,7 @@ class NativeReceiptIntegrationTests(unittest.TestCase):
             "seed": 42, "arms": ["BASE", "SKILL"], "tasks": [{
                 "task_id": "task-1", "base_sha": self.base,
                 "oracle_sha256": self.o_hash, "protected_paths": ["test.py"],
-                "runner": ["/usr/bin/python3", "/oracle/test.py"],
+                "runner": ["/usr/bin/python3", "-B", "/work/logic.py"],
                 "case_protocol": "host-oracle-stdin-v1"
             }]
         }))
@@ -133,6 +139,14 @@ class NativeReceiptIntegrationTests(unittest.TestCase):
             self.run_bridge()
         self.assertEqual(self.state()[0], "VERIFYING")
 
+
+    def test_sealed_oracle_case_count_mismatch_refused(self):
+        receipt = self.write_receipt("PASS")
+        receipt.update(case_count=1, passed_cases=1)
+        self.receipts.write_text(json.dumps(receipt) + "\n")
+        with self.assertRaisesRegex(grader.ContractError, "case count differs"):
+            self.run_bridge()
+        self.assertEqual(self.state()[0], "VERIFYING")
 
 if __name__ == "__main__":
     unittest.main()
