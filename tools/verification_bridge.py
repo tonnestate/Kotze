@@ -16,6 +16,7 @@ import sys
 
 from skill_grader import (ARMS, ContractError, RECEIPT_SCHEMA, STATES, canonical,
                           load_study, sha, task_of, tree_digest, under)
+from receipt_contract import validate_confidential_receipt
 
 
 def trusted_file(path: Path) -> Path:
@@ -65,6 +66,12 @@ def verified_receipt(manifest: Path, receipts: Path, task_id: str, arm: str) -> 
             or r.get("sandbox") != "linux-bubblewrap-unshare-all"
             or r.get("independent_execution_attestation") != "TRUSTED_HOST_CONFIGURATION_REQUIRED"):
         raise ContractError("Receipt/manifest provenance mismatch")
+    # Legacy /oracle-mounted execution cannot certify KOTZE verification.
+    # Host-owned receipt files and process identity remain external trust requirements.
+    try:
+        validate_confidential_receipt(r, task)
+    except ValueError as exc:
+        raise ContractError(str(exc)) from exc
     if r["state"] == "PASS" and (r.get("reason") != "TRUSTED_RUNNER_EXIT" or type(r.get("exit_code")) is not int or r["exit_code"] != 0):
         raise ContractError("Invalid passing grader exit evidence")
     if r["state"] == "FAIL" and (r.get("reason") != "TRUSTED_RUNNER_EXIT" or type(r.get("exit_code")) is not int or r["exit_code"] in (0, 125, 126, 127)):
