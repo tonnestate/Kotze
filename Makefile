@@ -17,5 +17,6 @@ check: build/test-core build/kotze-core
 	python3 -m unittest discover -s tests -p "test_gemma_worker.py" -v
 	python3 -m unittest discover -s tests -p "test_verification_bridge.py" -v
 	python3 -m unittest discover -s tests -p "test_verification_bridge_native.py" -v
+	python3 -m unittest discover -s tests -p "test_host_controller.py" -v
 clean:
 	rm -rf build
