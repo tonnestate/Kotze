@@ -30,6 +30,14 @@ class HostControllerTests(unittest.TestCase):
             patcher = patch.object(h.identity, name, return_value=result)
             patcher.start()
             self.addCleanup(patcher.stop)
+        def fake_bwrap(raw):
+            if not raw:
+                raise h.identity.IdentityRefused('Bubblewrap absent: unsandboxed execution is forbidden')
+            return '/usr/bin/bwrap'
+        patcher = patch.object(h.identity, 'require_trusted_bwrap',
+                               side_effect=fake_bwrap)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         (self.trusted / 'oracle').mkdir(mode=0o700)
         (self.trusted / 'oracle' / 'test.py').write_text('assert SECRET_DO_NOT_LEAK\n')
         (self.source / 'src.py').write_text('print(123)\n')
@@ -99,7 +107,7 @@ class HostControllerTests(unittest.TestCase):
     def test_no_unsandboxed_fallback(self):
         with patch.object(h.shutil, 'which', return_value=None):
             with patch.object(h.subprocess, 'Popen') as run:
-                with self.assertRaisesRegex(h.Refused, 'bubblewrap absent'):
+                with self.assertRaisesRegex(h.identity.IdentityRefused, 'Bubblewrap absent'):
                     h.run_worker(**self.args)
                 run.assert_not_called()
 
