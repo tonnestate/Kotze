@@ -11,8 +11,11 @@ build/kotze-core: src/main.c src/kotze.c include/kotze.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) src/main.c src/kotze.c -o $@ $(LDLIBS)
 build/test-core: tests/test_core.c src/kotze.c include/kotze.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_core.c src/kotze.c -o $@ $(LDLIBS)
-check: build/test-core build/kotze-core
+build/test-trajectory: tests/test_trajectory.c src/kotze_trajectory.c include/kotze_trajectory.h | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_trajectory.c src/kotze_trajectory.c -o $@
+check: build/test-core build/test-trajectory build/kotze-core
 	./build/test-core
+	./build/test-trajectory
 	python3 -m unittest discover -s tests -p "test_skill_grader.py" -v
 	python3 -m unittest discover -s tests -p "test_gemma_worker.py" -v
 	python3 -m unittest discover -s tests -p "test_verification_bridge.py" -v
