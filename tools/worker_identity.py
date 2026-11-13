@@ -44,6 +44,24 @@ def require_traversable_scratch(path: Path) -> Path:
     return root
 
 
+def require_trusted_bwrap(raw: str | None) -> str:
+    """Reject missing, substituted or group/world-writable sandbox launchers."""
+    if not raw:
+        raise IdentityRefused("Bubblewrap absent: unsandboxed execution is forbidden")
+    executable = Path(raw)
+    if not executable.is_absolute() or executable.name != "bwrap":
+        raise IdentityRefused("Bubblewrap executable must be an absolute approved path")
+    for element in (executable, *executable.parents):
+        info = element.lstat()
+        if stat.S_ISLNK(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+            raise IdentityRefused("Bubblewrap executable path must be root-owned and non-writable")
+    stat_info = executable.stat()
+    if not stat.S_ISREG(stat_info.st_mode) or not (stat_info.st_mode & 0o111):
+        raise IdentityRefused("Bubblewrap executable is not a trusted runnable file")
+    return str(executable)
+
+
+
 def prepare_worker_stage(stage: Path, uid: int, gid: int) -> None:
     """Transfer an already-sealed, host-created regular-file stage to worker UID.
 
