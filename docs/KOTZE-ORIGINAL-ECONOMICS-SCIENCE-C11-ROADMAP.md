@@ -17,7 +17,7 @@ Der Nutzer hat zu Recht festgestellt: Die Ansätze konkurrieren nicht. Sie stehe
 - **Repair-Paar und Zero Trust:** Reparaturakteur und Prüfer sind durch Betriebssystemrechte und unabhängige Datenquellen getrennt. Zwei unterschiedliche LLM-Prompts sind keine Sicherheitsisolation.
 - **KOTZE C11-Kern:** die verbindende, stabile Kontrollschicht für Vertrag, autorisierte Aktionen, Zustand, Budget, Beweiskette, Effekte und Wiederanlauf.
 
-**Kein Entweder-oder:** Zuerst ein einzelner funktionsfähiger Coding-Worker mit dem Host; optionale Spezialagenten oder Harness-Optimierung werden später als austauschbare, streng kontrollierte Policies aufgesetzt.
+**Kein Entweder-oder, aber eine klare Reihenfolge:** Zuerst sicherer Single-Worker und unabhängig überprüfbares Ergebnis. **Parallel zur minimalen Laufzeit wird früh ein versioniertes Harness-Profil-/Experimentmodell vorbereitet.** Harness²-artige Optimierung ist die erste größere Forschungsschicht nach dem vertrauenswürdigen Host; zusätzliche parallele Agenten werden nur bei positivem Grenznutzen aktiviert. Selbstoptimierung darf niemals die C11-Sicherheitsinvarianten ändern.
 
 ## 2. Was die Repositoryprüfung tatsächlich bestätigt
 
@@ -31,7 +31,8 @@ Der Nutzer hat zu Recht festgestellt: Die Ansätze konkurrieren nicht. Sie stehe
 | Gemma/andere Modelladapter, sicherer Tool Runner, Git-Patching | Nicht nachgewiesen | Zentraler fehlender vertikaler Slice |
 | Tatsächlich OS-isolierter, unabhängiger Prüfer | Nicht nachgewiesen | Die größte Sicherheitslücke |
 | Statistik/Repair-Empfehlung | Experimenteller Code auf dem **getrennten KOTZE-4-2-Branch** | Noch nicht im Original integriert; Rollen nicht vertrauenswürdig authentifiziert |
-| Grok-artige Multi-Agent-Orchestrierung oder Harness²-Promotion | Nicht nachgewiesen | Forschungsoption, kein Produktmerkmal |
+| Google-Harness²-artige Profilversionierung, Experimente, Promotion | Nicht nachgewiesen | Neue hohe Entwicklungspriorität, nicht als produktive Funktion ausgeben |
+| Grok-artige Multi-Agent-Orchestrierung | Nicht nachgewiesen | Vorläufig zurückgestellt; kein Produktmerkmal |
 
 **Qualitätseinschränkung:** Diese Bestandsaufnahme erfolgte als Read-only-Inspektion. Die aktuellen Branch-Änderungen wurden nicht kompiliert oder getestet. Ein Dateiname, eine Dokumentation oder ein Testfall beweist keinen fehlerfreien Ablauf.
 
@@ -52,38 +53,55 @@ Weitere Zielmetriken: unabhängige Erfolgsquote, Zeit bis zur verifizierten Lös
 
 **Wichtig:** Ohne echte Laufzeitmessungen gibt es keine belastbaren Eurobeträge oder ROI-Prognosen. Die folgende Reihenfolge ist eine risikogewichtete Architekturhypothese, keine empirisch belegte KOTZE-Rangliste.
 
-## 4. Wissenschaftliche Evidenz: was sich übertragen lässt
+Für eine Harness-Verbesserung gilt eine **Amortisationsbedingung**: Einsparungen aus späteren unabhängigen, verifizierten Aufgaben müssen zusätzliche Entwicklungs-, Probe-, Laufzeit- und Wartungskosten übersteigen. Die primäre Vergleichsgröße bleibt dabei **Kosten pro verifiziertem Erfolg**, nicht nur Kosten pro Modellaufruf. Eine Beschleunigung oder Tokenersparnis bei sinkender Korrektheit ist kein automatischer Gewinn. Die Probe-Kosten zählen einschließlich verworfener Kandidaten und können bei einem Einmalauftrag überwiegen.
 
-1. **Harness-Design hängt von Modell und Kontext ab.** In 176 experimentellen Einstellungen mit vier Modellen und zwei Coding-Benchmarks war regelbasierte Kontext-Elision vor modellgestützter Zusammenfassung häufig effizient. Explizite Planung und Toolregister hatten unterschiedliche Effekte abhängig von Modellfähigkeit und Aufgabenart. Daraus folgt **kein** universeller Sieg großer Toolregister.  
+## 4. Wissenschaftliche Evidenz und Lieferantenvergleich
+
+1. **Google Harness² (Oktober 2026):** trennt taskbezogenes Propose–Probe–Compose (Kontrastvergleich ohne Ground Truth während der Optimierung) von einer dauerhaften Experience-/Improvement-Schleife. Es nennt acht veränderliche Harness-Bestandteile: System Prompt, Guardrails, Memory, Tool Guidance, Subagents, Skills, Scripts und Plugins. Die berichteten Verbesserungen beziehen sich auf die untersuchten Modelle und Work-Benchmarks, nicht automatisch auf Coding-Reparatur. Das Repository beschreibt Benchmark-Setups mit offenen Netzen und teilweise deaktivierter Executor-Sandbox: **diese Sicherheitseinstellungen dürfen nicht übernommen werden**.  
+   Quellen: https://github.com/google-research/harness2 ; https://arxiv.org/abs/2610.14224
+2. **OpenAI (August/September 2026):** der offen zugängliche Codex-Harness und seine App-Server-Schnittstelle demonstrieren, wie Agent-Loop, Kontextmanagement, Tool-Events, Freigaben und Sandbox voneinander abgegrenzt werden können. Der managed Agents API-Ansatz unterstützt langlebige Läufe mit persistiertem Zustand und Recovery, ist aber ein optionaler externer Dienst mit eigenen Kosten und Vertrauensannahmen. Das Harness-Engineering beschreibt außerdem kurze, auffindbare Repository-Dokumentation statt eines riesigen und schnell veraltenden Regel-Prompts.  
+   Quellen: https://developers.openai.com/blog/codex-as-a-platform ; https://openai.com/index/introducing-the-agents-api/ ; https://openai.com/index/harness-engineering/
+3. **Anthropic (November 2025–April 2026):** der Long-Running-Harness verwendet inkrementelle Arbeit und klare Übergaben über Kontextfenster; Managed Agents trennt das langlebige Event-Log von der Modellkontext-Auswahl. Daraus folgt für KOTZE: **persistente Fakten/Events außerhalb des Kontextfensters**, selektive Rekonstruktion, kompakte Fortschrittsübergaben und kein künstliches Wiederauffüllen des gesamten Gesprächs. Ein separater Evaluator kann fachlich sinnvoll sein, muss aber für echte Zero-Trust-Garantien zusätzlich betriebssystemseitig getrennt sein.  
+   Quellen: https://www.anthropic.com/research/effective-harnesses-for-long-running-agents ; https://www.anthropic.com/research/managed-agents ; https://www.anthropic.com/research/harness-design-long-running-apps
+4. **Empirisches Harness-Design:** die Wirkung von Kontextstrategie, Planung und Werkzeugumfang hängt vom Modell und der Aufgabe ab. Daraus folgt keine pauschale Empfehlung für viele Agenten oder möglichst umfangreiche Toolkataloge.  
    Quelle: https://arxiv.org/abs/2609.20804
-2. **Harness² zeigt Verbesserungen durch Meta-Optimierung**, aber nur für untersuchte Modelle/Benchmarks. Der Propose–Probe–Compose-Prozess hat eigene Explorationskosten. Erst bei wiederkehrender Nutzung und gemessenen Folgegewinnen kann sich diese Investition rechnen.  
-   Quelle: https://github.com/google-research/harness2
-3. **xAI Multi-Agent** beschreibt einen führenden Agenten plus vier oder 16 zusammenarbeitende Agenten. xAI nennt höheren Tokenverbrauch und längere Latenz bei höherer Agentenzahl. Die dokumentierte Zusammenarbeit darf nicht mit einer kausal bewiesenen Verbesserung der KOTZE-Code-Reparatur gleichgesetzt werden.  
+5. **Grok/xAI Multi-Agent:** parallel arbeitende Agenten können bei gut zerlegbaren Aufgaben nützlich sein, erhöhen jedoch Inferenz- und Koordinationskosten. Ein Agenten-Konsens beweist keine korrekte Änderung. In KOTZE nur ein **späteres, selektives Eskalationsmittel**.  
    Quelle: https://docs.x.ai/developers/model-capabilities/text/multi-agent
-4. **Verschiedene Harness-Komponenten können sich negativ auswirken.** Für Coding-Aufgaben untersuchte Forschung findet abnehmenden Grenznutzen komplexer Harnesses und teils Nachteile für pauschale Kontextkompression oder generische Subagenten. Deshalb müssen Optionen einzeln und in Kombination abliert werden.  
-   Quelle: https://arxiv.org/abs/2609.32459
-5. **Externe Skills/MCP-Konfigurationen schaffen eine Supply-Chain-Fläche.** Das bloße Installieren zahlreicher GitHub-Skills ist kein Sicherheits- oder Qualitätsnachweis. Versionen, erlaubte Aktionen, Herkunft und Rechte müssen überprüft werden.  
-   Quelle: https://arxiv.org/abs/2609.07360
 
-Diese Quellen liefern methodische Hinweise, **keine auf KOTZE gemessenen Ergebnisse**.
+Diese Belege begründen ein Forschungsprogramm und eine ökonomisch sinnvolle Reihenfolge, **keinen bereits gemessenen KOTZE-Leistungsvorsprung**.
 
-## 5. Priorität und technische Abgrenzung
+## 5. Neu priorisierte Implementierung — Harness² vor Multi-Agent
 
-| Priorität | Zu implementieren | Gehört in C11? | Wirtschaftlich/wissenschaftliche Begründung | Fertig, wenn… |
-| --- | --- | --- | --- | --- |
-| **P0.1** | Authentifizierter lokaler Host, autoritative Rollentrennung und IPC mit Schema-/Größenprüfung | **Ja**, plus OS-spezifische Sicherheitsadapter | Erst damit werden Verbotspolitik und Prüfergrenze technisch erzwingbar. Ohne diesen Schritt sind Erfolgsaussagen wertlos. | Worker darf weder DB noch VERIFIER/OWNER-Aktionen direkt ausführen |
-| **P0.2** | Kontrollierter Tool- und Prozessdispatcher (argv statt Shell-Interpolation, Arbeitsverzeichnis, Ressourcenlimits, Zeitüberschreitung, Ausgabenlimit, Deny-by-default) | **Ja** für Steuerung, OS-Adapter für Sandbox | Ermöglicht erstmals reale, begrenzte Arbeit und schützt vor finanziellen/technischen Nebenwirkungen. | Erlaubte Aktionen sind protokolliert; verbotene Aktionen haben keine Wirkung |
-| **P0.3** | Vertrauenswürdige Verifier-Grenze, eingefrorener Ausgangszustand, originaler Fehlerpfad, regressionsbezogene Belege | **Ja** für Beweis- und Zustandskontrolle; Prüftools extern | Ohne echte unabhängige Prüfung lässt sich weder Skill-Lift noch Erfolg messen. | Worker kann eigene PASS-Receipts nicht erzeugen oder Testorakel ändern |
-| **P0.4** | Einfacher Single-Worker-Model-/Tool-Loop mit austauschbarem Adapter | **Nur Protokoll/Kontrolle in C11**; Modell-API außerhalb | Kleinster vollständiger funktionaler Slice. Keine teure Orchestrierung vor Produktnachweis. | Ein Bug wird von Aufnahme bis Patch und unabhängigem Prüfresultat bearbeitet |
-| **P0.5** | Git-Workspace-/Patch-Sicherung, unveränderter Baseline-Snapshot, last-good Candidate, Absturz-Recovery | **Teilweise** (Leases, Digests, Admission), Git-/Filesystem-Adapter separat | Verhindert Zerstörung und Wiederholung unklarer Außenwirkungen. | Neustart führt zu erklärbarem sicheren Status, nicht zum doppelten Effekt |
-| **P1** | Deterministisches Retrieval, knappe Dateikontexte, Budget-bewusste Kompaktierung | **C11 nur für Budget-/Policy-Gates** | Hoher plausibler Kosten-/Qualitätshebel, ohne jeden Schritt durch ein LLM zu schicken. | Auditierbare Reduktion von Kontext-Überlauf und Tokenverschwendung |
-| **P1** | Modellabhängige Tool-/Skill-Profile (Gemma zuerst nur nach konkretem Testplan) | **C11 für Zulassung und Versionen**, Skills extern | Kleine Modelle können gezielt entlastet werden, ohne Modelltraining. | Pro Profil sind Tools, Rechte und Kosten reproduzierbar |
-| **P2** | Evidence-labelled Episodenspeicher und konservative Repair-Empfehlung | **Ja** für Journaling und Auslese; Statistik ggf. extern | Lernfähigkeit über Aufgaben, aber erst sinnvoll mit vertrauenswürdigen Prüfnachweisen. | Ergebnisse sind task-/umgebungsgebunden; sparse cohorts führen zu ABSTAIN |
-| **P3** | Selektive, begrenzte parallele Spezialagenten mit Merge-/Conflict-Gates | **C11 für Rechte/Budget**, Orchestrierung extern | Kann bei zerlegbaren Problemen helfen, aber Multi-Agent-Kosten und Koordinationsfehler beachten. | Gegen Single-Worker-Baseline messbarer Mehrwert bei gleichem Gesamtbudget |
-| **P4** | Harness²-inspirierte, versionierte Propose–Probe–Compose-Forschung und Promotion-Gates | **C11 für unveränderbare Schutzregeln und Promotionsfreigabe** | Potenziell skalierbar, aber hohe Kosten für Kandidaten/Probes und Gefahr von Overfitting. | Held-out-Erfolg und Kosten stimmen, Sicherheitsregeln bleiben unangetastet |
-| **P5** | LoRA/Distillation/Training | **Nein** | Erst sinnvoll, wenn Daten belegen, dass Modellgewichte – nicht Toolführung/Kontext/Oracle – limitieren. | Vorab registrierter Vergleich zeigt Nettoverbesserung gegenüber einfachem Jacket |
+| Priorität | Maßnahme | C11-Anteil | Nachweis-/Kostengrenze |
+| --- | --- | --- | --- |
+| **P0.1** | Trusted Host und IPC mit authentifizierter Peer-Identität, strikt validierten Nachrichten, Rollen-/Capability-Mapping | **Kern in C11**, Linux-OS-Adapter | Worker erhält keine DB-/OWNER-/VERIFIER-Rechte |
+| **P0.2** | Deny-by-default Tool-Dispatcher, Pfad-/Prozess-/Budget-/Netzwerk-Gates | **Kern in C11**, isolierte OS-Ausführung | Verbotene Aktionen erreichen das Host-System nicht |
+| **P0.3** | Getrennter Verifier mit eingefrorenen Orakeln, Versionen, Prüfnachweisen | **Admission, Ledger, Gates in C11**; Oracle-Prozess extern | Worker kann Tests/PASS-Meldungen nicht manipulieren |
+| **P0.4** | Minimaler Single-Worker-Loop mit austauschbarem Modelladapter | **Protokoll/FSM in C11**, Provider/Inference außerhalb | Eine Aufgabe erreicht korrekten, überprüften Abschluss |
+| **P0.5** | Git-Baseline, geschützter Patch, Recovery und vorhandene Effect-Outbox komplett anbinden | **Leases, Zustandsprüfung in C11**, Git-Adapter extern | Keine doppelte unbekannte Remote-Mutation |
+| **P1.1 — vorgezogen** | **Harness²-Profilregister:** versionierte `system_prompt`, `guardrail_config`, `memory_policy`, `tool_guidance`, `subagent_policy`, `skill_set`, `script_set`, `plugin_set`; feste Baseline und unveränderliche Schutzregeln | **Ja: Versions-/Hash-/Zulassungs- und Promotion-Metadaten in C11/SQLite** | Konfiguration ist reproduzierbar, kein Profil kann Sicherheitsgrenzen erweitern |
+| **P1.2 — vorgezogen** | **Context Engineering nach OpenAI/Anthropic:** Event-Slicing, gezieltes Repository-Retrieval, kompakte Übergabe, deterministisches Elision-/Budget-Management | **Nur Kontext-/Budget-Policy in C11**, Retrieval/Formatter extern | Wiederaufnahmen und Kontextkosten reproduzierbar |
+| **P1.3** | Versionsgebundene Skills/Tool-Guidance für einzelne Modelle, einschließlich Gemma | **Capability- und Skill-Freigabe in C11** | Keine unbewertete Übernahme beliebiger externer Skills |
+| **P2.1 — vorgezogen** | **Harness²-Experimentledger:** Propose–Probe–Compose als optionale, streng budgetierte Offline-/lokale Versuchsschleife; Kandidaten erfassen, Ergebnisse vergleichen, Zusammenstellung dokumentieren | **Ja: Profil-Snapshots, Budget-/Experimentzustände, Metadaten**; Candidate-Generator/Probes extern | Kein autonomer Probe-Lauf ohne explizite Freigabe; Kosten inkl. Fehlschlägen |
+| **P2.2** | Statistical Second Brain: versionierte Episoden und unabhängige Erfolgs-/Fehleretiketten | **Ja für Ledger**, Statistik ggf. extern | Nur vertrauenswürdige Evidenz, Konfidenz und ABSTAIN |
+| **P2.3** | Promotion-/Rollback-Gate für Verbesserungen auf Held-out-Aufgaben | **Ja: explizite Freigabe und unveränderliche Policy** | Nur nach unabhängigen vergleichbaren Ergebnissen, Kosten-/Risiko-Nachweis |
+| **P4** | Selektive Grok-artige Multi-Agent-Orchestrierung | **Nur Budget-/Delegationspolicy in C11** | Erst bei nachgewiesenem Mehrwert gegenüber Single Worker; standardmäßig aus |
+| **P5** | LoRA/Distillation/Training | **Nein** | Nur wenn Modellgewicht-Engpass statt Harness-Engpass nachgewiesen ist |
 
-**Kernentscheidung:** Im nächsten Schritt **P0.1 + P0.2 als eine sichere Host-Grenze** implementieren, danach P0.3 und einen vollständigen P0.4-Slice. Keine zusätzliche Reporting-Engine, BIM-, Bau-, ISO- oder Präsentationsfunktion im Originalkern.
+### C11-Grenze für Harness²
+
+**In C11 implementieren:**
+- `harness_profiles` mit stabilen IDs, Versionen, Hashes, Elternbeziehung, Modellspezifikation und freigegebenem Skill-/Tool-Umfang;
+- `harness_experiments` mit Basis-/Kandidatenprofil, eingefrorenem Task-/Umwelt-Digest, Probe-Budget, Kostenereignissen und Stop-Zustand;
+- `harness_promotion` mit Evidence-Referenz, unabhängiger Prüfer-Autorität, Ablehnungsgrund, voriger Version und Rollback-Protokoll;
+- sichere, schreibgeschützte Abfrage eines freigegebenen Profils durch den Host, niemals Schreibrecht des Coding-Workers;
+- eindeutige Zuordnung jedes Work-Laufs zu exakt einer Profilversion, sodass nachträgliche Profiländerungen keine Historie umlabeln.
+
+**Nicht in C11 implementieren:** Modell-Prompts schreiben, Kandidaten semantisch bewerten, Transformer inference, externe Benchmark-Probes, ein generisches LLM-Framework oder parallele Spezialagenten. Diese Komponenten gehören hinter das vorhandene Host-/Capability-Gate.
+
+**Wesentliche Unterscheidung:** Dass Harness² auf einer Aufgabe ohne Ground-Truth-Feedback **Verbesserungskandidaten** auswählt, rechtfertigt keine ungeprüfte **produktive Promotion**. KOTZE verwendet weiterhin geschützte Held-out-Orakel oder ausdrücklich freigegebene manuelle Abnahme. Durch zusätzliche Probes entstehende Kosten sind vollständig zu erfassen.
+
+**Kernentscheidung:** **P0 Host/Verifier ist das Sicherheitsfundament; P1 Harness²-Profile und OpenAI-/Anthropic-Kontextverfahren sind der nächste Leistungshebel; P2 evaluiert begrenzt; P4 Multi-Agent bleibt deaktiviert.** Kein Bau-/BIM-/Reporting-Scope im Originalkern.
 
 ## 6. Was wir bewusst *nicht* in C programmieren
 
@@ -129,4 +147,4 @@ Erst danach die erste real ausgeführte und unabhängig geprüfte Coding-Aufgabe
 - xAI Multi-Agent documentation: https://docs.x.ai/developers/model-capabilities/text/multi-agent
 - KOTZE Original: `docs/CORE_PHASE1.md`, `docs/EFFECT_DISPATCH.md`, `docs/KOTZE-Agent-Konzept.md`
 
-**Schlussentscheidung:** C11 implementiert verbindliche Kontrolle, Persistenz und Ausführungsgrenzen. Modelle, Skills, Spezialagenten und Harness² sind austauschbare, ökonomisch nachzuweisende Optionen darüber. Wachstum der Codebasis ist kein Leistungsindikator. **Ein korrekt kontrollierter und unabhängig nachweisbarer End-to-End-Workflow ist der erste wirtschaftliche und wissenschaftliche Meilenstein.**
+**Schlussentscheidung:** C11 implementiert verbindliche Kontrolle, Persistenz, Harness-Profilversionen und Ausführungsgrenzen. **Google Harness² ist nach dem sicheren Single-Worker-Fundament der wichtigste frühe Forschungshebel.** OpenAI und Anthropic liefern anschlussfähige Methoden für Kontext, Laufzeit und persistente Übergaben. Multi-Agent wird nur bei belegter Grenzwirtschaftlichkeit freigeschaltet. Wachstum der Codebasis ist kein Leistungsindikator. **Ein korrekt kontrollierter und unabhängig nachweisbarer End-to-End-Workflow bleibt der erste technische Meilenstein.**
