@@ -103,6 +103,12 @@ Diese Belege begründen ein Forschungsprogramm und eine ökonomisch sinnvolle Re
 
 **Kernentscheidung:** **P0 Host/Verifier ist das Sicherheitsfundament; P1 Harness²-Profile und OpenAI-/Anthropic-Kontextverfahren sind der nächste Leistungshebel; P2 evaluiert begrenzt; P4 Multi-Agent bleibt deaktiviert.** Kein Bau-/BIM-/Reporting-Scope im Originalkern.
 
+### Verbindliche Performance- und Cursor-Architektur
+
+Performance ist ab Phase 0 ein eigenes Abnahmekriterium: deterministische, häufige Prüf- und Zustandsoperationen bevorzugt in **C11**; asynchrone I/O-Verarbeitung und begrenzte parallele unabhängige Tasks, aber serialisierte Mutationen und Verifier-Gates. Der von StrawberryMe bekannte **MAP_CURSOR** inspiriert ein indiziertes, versionsgebundenes KOTZE-Register mit Current/Future/Observed-Positionen und evidenzgesteuerter Dependency-Expansion statt Vollkontext. Das ist ein **noch nicht implementiertes Architekturziel**, kein CPU-Register oder zweites OGI-/FruitStack-Register.
+
+Die nächste Performance-Tranche ergänzt den sicheren Host um C11-Registry-/Cursor-Verträge, vorbereitete SQLite-Indizes, einen bounded Scheduler und reproduzierbare Performance-/Kostenmetriken. Technische Details und Invarianten: [Performance, Register/Cursor und Parallelität](KOTZE-ORIGINAL-PERFORMANCE-REGISTER-CURSOR.md).
+
 ## 6. Was wir bewusst *nicht* in C programmieren
 
 - Keine eigene Transformer-Inferenz, Tokenisierung, Gemma-Feinabstimmung oder model-spezifischen Prompt-Formatter in C.
