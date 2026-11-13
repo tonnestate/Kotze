@@ -50,6 +50,15 @@ execute code, change work state or claim independent verification**. See
 [read-only host boundaries](docs/KOTZE-ORIGINAL-READ-HOST.md). Runtime
 security testing and deployment have not been performed.
 
+## Native restricted Git diagnostic runner
+
+The first standalone C11 runner supports only fixed Git status and changed-file
+diagnostics in a separately provisioned unprivileged identity. It has no shell,
+no model-controlled executable or arguments, and bounded CPU, memory, time,
+descriptors and output. This is NOT a complete sandbox or verifier. See
+[Git diagnostic runner contract](docs/KOTZE-ORIGINAL-TOOL-RUNNER.md).
+Code and offline test cases have not been executed.
+
 ## Local build (no GitHub Actions / hosted runners)
 
 Requirements: C11 compiler, SQLite3 development library, `make`.

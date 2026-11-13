@@ -4,7 +4,7 @@ CPPFLAGS ?= -Iinclude -D_POSIX_C_SOURCE=200809L
 LDLIBS ?= -lsqlite3 -pthread
 
 .PHONY: all check clean
-all: build/kotze-core build/kotze-read-host
+all: build/kotze-core build/kotze-read-host build/kotze-probe
 build:
 	mkdir -p build
 build/kotze-core: src/main.c src/kotze.c src/kotze_dispatch.c src/kotze_register.c src/kotze_async.c include/kotze.h include/kotze_dispatch.h include/kotze_register.h include/kotze_async.h | build
@@ -19,14 +19,19 @@ build/test-dispatch: tests/test_dispatch.c src/kotze_dispatch.c include/kotze_di
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_dispatch.c src/kotze_dispatch.c -o $@ $(LDLIBS)
 build/kotze-read-host: src/kotze_read_host.c src/kotze_protocol.c src/kotze_register.c src/kotze_async.c include/kotze_protocol.h include/kotze_register.h include/kotze_async.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) src/kotze_read_host.c src/kotze_protocol.c src/kotze_register.c src/kotze_async.c -o $@ $(LDLIBS)
+build/kotze-probe: src/kotze_probe_cli.c src/kotze_probe.c include/kotze_probe.h | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) src/kotze_probe_cli.c src/kotze_probe.c -o $@
+build/test-probe: tests/test_probe.c src/kotze_probe.c include/kotze_probe.h | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_probe.c src/kotze_probe.c -o $@
 build/test-protocol: tests/test_protocol.c src/kotze_protocol.c include/kotze_protocol.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_protocol.c src/kotze_protocol.c -o $@ $(LDLIBS)
-check: build/test-core build/test-dispatch build/test-register build/test-async build/test-protocol
+check: build/test-core build/test-dispatch build/test-register build/test-async build/test-protocol build/test-probe
 	./build/test-core
 	./build/test-dispatch
 	./build/test-register
 	./build/test-async
 	./build/test-protocol
+	./build/test-probe
 	python3 -m unittest discover -s tests -p "test_skill_grader.py" -v
 clean:
 	rm -rf build
