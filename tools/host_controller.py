@@ -46,6 +46,26 @@ def strict_dir(path: Path, *, private: bool = False) -> Path:
     return result
 
 
+def trusted_bwrap_path() -> str:
+    """Reject injected launcher paths even when PATH belongs to the host process."""
+    value = shutil.which('bwrap')
+    if not value:
+        raise Refused('bubblewrap absent; unsandboxed worker forbidden')
+    path = Path(value)
+    if not path.is_absolute() or path.is_symlink() or not path.is_file():
+        raise Refused('Bubblewrap executable must be an absolute regular host file')
+    path = path.resolve(strict=True)
+    info = path.stat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+            or info.st_mode & 0o022 or not os.access(path, os.X_OK)):
+        raise Refused('Bubblewrap executable must be root-owned and not writable by workers')
+    for parent in path.parents:
+        info = parent.stat()
+        if info.st_uid != 0 or info.st_mode & 0o022:
+            raise Refused('Bubblewrap executable has an untrusted ancestor directory')
+    return str(path)
+
+
 def require_worker_identity(worker_uid: int, worker_gid: int) -> None:
     """Only a privileged trusted host can launch a distinct, explicit OS identity."""
     if sys.platform != 'linux' or os.geteuid() != 0:
@@ -203,9 +223,7 @@ def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
                worker_uid: int, worker_gid: int, timeout: int = 120) -> dict:
     if os.name != 'posix' or sys.platform != 'linux':
         raise Refused('Linux namespace sandbox required')
-    bwrap = shutil.which('bwrap')
-    if not bwrap:
-        raise Refused('bubblewrap absent; unsandboxed worker forbidden')
+    bwrap = trusted_bwrap_path()
     require_worker_identity(worker_uid, worker_gid)
     if arm not in ('BASE', 'SKILL') or type(timeout) is not int or not 1 <= timeout <= 300:
         raise Refused('Invalid arm or worker timeout')
