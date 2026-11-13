@@ -60,6 +60,9 @@ class ConfidentialOracleTests(unittest.TestCase):
             def __init__(self, command, **kw):
                 invocations.append(command)
                 assert '--unshare-all' in command
+                assert '--unshare-user' in command
+                assert '--unshare-net' in command
+                assert '--unshare-pid' in command
                 assert '--ro-bind' in command
                 assert '--bind' in command
                 assert '--clearenv' in command
