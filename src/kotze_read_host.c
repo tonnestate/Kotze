@@ -180,6 +180,7 @@ static int run_server(int listener,uid_t allowed,const char *scope,
     connection *clients=calloc(CLIENT_MAX,sizeof(*clients));
     if(!clients)return 1;
     for(int i=0;i<CLIENT_MAX;i++)clients[i].fd=-1;
+    int fatal_error=0;
     while(!stop_requested){
         struct pollfd fds[CLIENT_MAX+1];
         int index[CLIENT_MAX+1];
@@ -195,27 +196,27 @@ static int run_server(int listener,uid_t allowed,const char *scope,
             }
             if(c->state==WAITING)poll_job(c,jobs);
             if(c->state==EMPTY)continue;
-            if(c->state==WAITING)waiting++;
-            short events=c->state==READING?POLLIN:
-                         c->state==SENDING?POLLOUT:POLLIN;
+            if(c->state==WAITING){waiting++;continue;}
+            short events=c->state==READING?POLLIN:POLLOUT;
             fds[count]=(struct pollfd){c->fd,events,0};
             index[count++]=i;
         }
         int rc=poll(fds,count,waiting?25:250);
-        if(rc<0){if(errno==EINTR)continue;break;}
+        if(rc<0){if(errno==EINTR)continue;fatal_error=1;break;}
         for(nfds_t k=1;k<count;k++){
             connection *c=&clients[index[k]];
             short ev=fds[k].revents;
             if(!ev)continue;
-            if(ev&(POLLERR|POLLNVAL|POLLHUP)){
+            if(ev&(POLLERR|POLLNVAL)){
                 discard(c,jobs);continue;
             }
-            if(c->state==READING&&(ev&POLLIN))consume(c,scope,registry,jobs);
-            else if(c->state==SENDING&&(ev&POLLOUT))flush(c,jobs);
-            else if(c->state==WAITING&&(ev&POLLIN)){
-                char extra;
-                ssize_t peek=recv(c->fd,&extra,1,MSG_PEEK|MSG_DONTWAIT);
-                if(peek>=0)discard(c,jobs);
+            if(c->state==READING){
+                /* Half-close after sending a complete request is permitted:
+                 * read the request before reacting to peer POLLHUP. */
+                if(ev&POLLIN)consume(c,scope,registry,jobs);
+                else if(ev&POLLHUP)discard(c,jobs);
+            }else if(c->state==SENDING && (ev&(POLLOUT|POLLHUP))){
+                flush(c,jobs);
             }
         }
         if(fds[0].revents&POLLIN){
@@ -240,7 +241,23 @@ static int run_server(int listener,uid_t allowed,const char *scope,
     for(int i=0;i<CLIENT_MAX;i++)
         if(clients[i].state!=EMPTY)discard(&clients[i],jobs);
     free(clients);
-    return 0;
+    return fatal_error?1:0;
+}
+/* A worker must never be able to replace the socket inode through a
+ * group/world-writable parent directory. This does not inspect all ancestors
+ * or POSIX ACLs; those still require host provisioning. */
+static int secure_socket_parent(const char *path,uid_t owner){
+    char dir[sizeof(((struct sockaddr_un*)0)->sun_path)];
+    size_t n=strlen(path);
+    if(n==0||n>=sizeof(dir))return 0;
+    memcpy(dir,path,n+1);
+    char *slash=strrchr(dir,'/');
+    if(!slash)strcpy(dir,".");
+    else if(slash==dir)dir[1]='\0';
+    else *slash='\0';
+    struct stat st;
+    return lstat(dir,&st)==0 && S_ISDIR(st.st_mode) &&
+        !(st.st_mode&0022) && (st.st_uid==owner||st.st_uid==0);
 }
 int main(int argc,char **argv){
     if(argc!=5){
@@ -264,6 +281,11 @@ int main(int argc,char **argv){
     struct sockaddr_un address;
     if(!socket_path[0]||strlen(socket_path)>=sizeof(address.sun_path)){
         fputs("Invalid socket path\n",stderr);return 2;
+    }
+    if(!secure_socket_parent(socket_path,geteuid())){
+        fputs("Socket parent must be host/root-owned and non-writable by group/other\n",
+              stderr);
+        return 2;
     }
     struct stat existing;
     if(lstat(socket_path,&existing)==0||errno!=ENOENT){

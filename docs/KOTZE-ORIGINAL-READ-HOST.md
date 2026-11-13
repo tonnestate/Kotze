@@ -8,7 +8,7 @@ This is a narrow host/worker IPC boundary for read-only registry lookups, **not*
 
 - A dedicated, non-root host UID must differ from the configured worker UID. Startup rejects same-UID and root execution.
 - Database file must be a regular file owned by the host UID with no group/other access. This check alone does not audit inherited file descriptors, ACLs, directory access, backups, SQLite WAL/SHM, or hostile host configuration. OS isolation must still be provisioned independently.
-- The Unix socket admits only callers whose OS UID matches the explicitly configured worker UID (SO_PEERCRED). The socket uses mode 0660 and must reside in a secure directory **not writable by the worker**. The worker must have the appropriate group access to connect.
+- The Unix socket admits only callers whose OS UID matches the explicitly configured worker UID (SO_PEERCRED). The socket uses mode 0660. The service refuses a group/world-writable or foreign-owned immediate parent directory. All ancestor paths and ACLs still require separate administration. The worker must have the appropriate group access to connect.
 - Every instance is restricted to exactly one work ID passed on the trusted command line. A client-supplied work ID is never an authorization grant.
 - The only V1 requests are GET and EDGES; neither dispatches a tool, starts a model, executes a shell, writes to SQLite or marks verification as successful.
 - Resource limits: 16 clients, 512-byte input, 32 outstanding read/result slots, four read-only SQLite workers, 64 neighbors per request, 32768-byte output, 15-second client deadline.
@@ -47,3 +47,7 @@ Never expose the socket over TCP. Do not run as root or with the same UID as the
 The current service does not implement persistent leases, a protected process/shell runner, Git worktree isolation, external effects, independent verifier admission, model adapters or full per-work ACL provisioning. The read host does not itself constitute a complete OS sandbox. A separate guarded tool host and protected verification bridge must follow.
 
 Tests have been authored but **not run**. All performance and safety properties remain subject to independent measurement and adversarial validation.
+
+## Local socket lifecycle hardening
+
+The event loop tolerates peers that half-close their writing side after a complete request, while still delivering the read-only response. In-flight jobs are not registered as poll-readable connections; abandoned reads are bounded by the client deadline and canceled when the connection is cleaned up. A fatal poll error returns a nonzero host exit status. The immediate socket directory must be owned by the host UID or root and may not be group- or world-writable; symlinked ancestors and ACLs remain external provisioning responsibilities.
