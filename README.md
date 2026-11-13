@@ -12,7 +12,7 @@ The [trusted worker host](docs/HOST_WORKER_ISOLATION.md) now stages a pinned can
 
 The [trusted receipt bridge](docs/TRUSTED_RECEIPT_BRIDGE.md) binds external grader receipts to the current C11 work snapshot and revision, rejecting a model's unverified PASS claim. The native CLI is still not authenticated and full isolation is not claimed.
 
-The legacy [external skill grader](docs/SKILL_GRADER.md) performs paired task evaluation outside the worker workspace using frozen read-only oracles and a fail-closed OS-sandbox requirement. It still mounts /oracle during candidate test execution and cannot certify confidential hidden tests. It statistically compares BASE versus SKILL under matched tasks; it is not an authenticated production verifier.
+The legacy [external skill grader](docs/SKILL_GRADER.md) can **no longer launch candidate grading**: its former `/oracle` read-only mount exposed hidden tests, so `grade` always refuses. Its paired BASE/SKILL statistical `analyze` command remains available. The separate [confidential grader](docs/CONFIDENTIAL_ORACLE.md) is the only current candidate-grading path, and supports deterministic stdin/stdout tasks only.
 
 The optional [Gemma worker adapter](docs/GEMMA_WORKER.md) binds local Ollama, Google's hosted Gemma 4 API, and OpenRouter's free Gemma 4 variants to the C11 MODEL-action reservation. Its responses are **unverified proposals**, not executed patches or grader receipts. Hosted calls require explicit domain-upload approval.
 

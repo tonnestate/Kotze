@@ -1,9 +1,9 @@
 # External Skill Grader — phase 1.5
 
-> Phase 1.8 update: this legacy grading mode still mounts /oracle into candidate execution. Its receipts are no longer accepted by the C11 verification bridge. New confidential host-private stdin/stdout grading is documented in [Confidential Oracle](CONFIDENTIAL_ORACLE.md). Existing statistical analyses remain descriptive and unchanged.
+> SECURITY UPDATE (post phase 2.1): legacy `skill_grader.py grade` is now **permanently disabled**, including when Bubblewrap is present. Earlier code bound `/oracle` read-only into candidate execution, which exposed hidden tests. The old recipe below is kept only as historical research documentation; **do not execute it**. Use [Confidential Oracle](CONFIDENTIAL_ORACLE.md) for currently supported deterministic stdin/stdout verification. `skill_grader.py analyze` remains available for statistical analysis of recorded trials; receipt origins are not cryptographically attested.
 
 
-**Status: implemented offline grader/scorer adapter; OS-sandbox execution supported only with bubblewrap; live agent integration and independent holdout provisioning not verified.** The KOTZE Harness C11 control core remains language-agnostic. This tool is a **trusted-host companion**, not an agent skill, worker tool, or second permanent service.
+**Status: legacy execution disabled; statistical paired-score analysis available. The confidential grader is separate and not production-certified.** The KOTZE Harness C11 control core remains language-agnostic. This tool is a **trusted-host companion**, not an agent skill, worker tool, or second permanent service.
 
 ## Motivation and provenance
 
