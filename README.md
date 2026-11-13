@@ -19,11 +19,14 @@ runtime is implied.** See [effect dispatch and crash recovery](docs/EFFECT_DISPA
 
 The economic and scientific implementation decisions for the **original coding
 harness** are documented in [Economics, evidence and C11 implementation roadmap](docs/KOTZE-ORIGINAL-ECONOMICS-SCIENCE-C11-ROADMAP.md).
-The next engineering boundary is the trusted local host and independent verifier,
-not a larger multi-agent runtime or unrestricted harness self-optimization.
-Multi-agent collaboration, Gemma-specific jackets, statistical repair memory and
-Harness²-style improvement are complementary *later* options, each subject to
-independent evaluation and measured cost per verified result.
+The next engineering boundary is the trusted local host and independent
+verifier. **Google Harness²-style versioned profiles and bounded improvement
+experiments are prioritized immediately after that minimum safe single-worker
+foundation**, alongside OpenAI/Anthropic context engineering and durable handoffs.
+Grok-style multi-agent orchestration is an optional, default-off escalation that
+requires evidence of higher verified-task quality per total cost. Gemma profiles,
+statistical memory and model adapters remain interchangeable. No model-driven
+change can promote a new safety policy or alter the native trust boundary.
 
 ## Local build (no GitHub Actions / hosted runners)
 
