@@ -211,6 +211,26 @@ int kr_link(kotze_register_t *r,const char *work,int64_t rev,int64_t epoch,
     rc=done(r,s);if(rc==KR_OK)rc=bump(r,work);
     return end_tx(r,rc);
 }
+int kr_work_current(kotze_register_t *r,const char *work,
+                    int64_t *revision,int64_t *epoch){
+    if(!r||!valid(work,128)||!revision||!epoch)return KR_DENIED;
+    if(begin_tx(r,0)<0)return KR_ERROR;
+    sqlite3_stmt *s=NULL;
+    int rc=prep(r,&s,"SELECT revision,evidence_epoch FROM works WHERE id=?");
+    if(rc<0)return end_tx(r,rc);
+    bind(s,1,work);
+    int st=sqlite3_step(s);
+    if(st!=SQLITE_ROW){
+        sqlite3_finalize(s);
+        return end_tx(r,fail(r,st==SQLITE_DONE?KR_DENIED:KR_ERROR,
+            st==SQLITE_DONE?"unknown work":sqlite3_errmsg(r->db)));
+    }
+    int64_t v=sqlite3_column_int64(s,0),e=sqlite3_column_int64(s,1);
+    sqlite3_finalize(s);
+    rc=end_tx(r,KR_OK);
+    if(rc==KR_OK){*revision=v;*epoch=e;}
+    return rc;
+}
 int kr_cursor_open(kotze_register_t *r,const char *work,const char *key,
                    int64_t rev,int64_t epoch,kr_cursor *out){
     if(!r||!out||!valid(work,128)||!valid(key,128)||rev<0||epoch<0)

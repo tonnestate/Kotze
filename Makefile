@@ -17,11 +17,14 @@ build/test-register: tests/test_register.c src/kotze.c src/kotze_register.c incl
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_register.c src/kotze.c src/kotze_register.c -o $@ $(LDLIBS)
 build/test-dispatch: tests/test_dispatch.c src/kotze_dispatch.c include/kotze_dispatch.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_dispatch.c src/kotze_dispatch.c -o $@ $(LDLIBS)
-check: build/test-core build/test-dispatch build/test-register build/test-async
+build/test-protocol: tests/test_protocol.c src/kotze_protocol.c include/kotze_protocol.h | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_protocol.c src/kotze_protocol.c -o $@ $(LDLIBS)
+check: build/test-core build/test-dispatch build/test-register build/test-async build/test-protocol
 	./build/test-core
 	./build/test-dispatch
 	./build/test-register
 	./build/test-async
+	./build/test-protocol
 	python3 -m unittest discover -s tests -p "test_skill_grader.py" -v
 clean:
 	rm -rf build

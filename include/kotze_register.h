@@ -42,6 +42,9 @@ int kr_link(kotze_register_t *r, const char *work_id, int64_t revision, int64_t 
 
 /* Read-only, snapshot-validated lookup; stale work/epoch/register generation
  * fails closed with KR_CONFLICT. No raw SQLite pointers escape the library. */
+/* Read-only revision/epoch lookup; must be revalidated by cursor_open. */
+int kr_work_current(kotze_register_t *r,const char *work_id,
+                    int64_t *revision,int64_t *evidence_epoch);
 int kr_cursor_open(kotze_register_t *r, const char *work_id, const char *object_key,
                    int64_t revision, int64_t epoch, kr_cursor *out);
 int kr_cursor_read(kotze_register_t *r, const kr_cursor *cursor, kr_entry *out);
