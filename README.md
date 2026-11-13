@@ -2,6 +2,8 @@
 
 The repository contains the first **C11/SQLite control-plane implementation** of KOTZE Harness. The library is language-agnostic and persists work identity, original requirements, event-driven finite-state transitions, repair candidates, verifier-bound outcome claims, enumerated hypotheses, action-budget reservations, anti-repeat decisions, and verified-success records.
 
+The [live isolation acceptance probe](docs/ISOLATION_ACCEPTANCE.md) now checks real Linux namespace, filesystem, environment and loopback-network separation using an explicit different worker OS identity. It has not passed in this environment because bubblewrap is absent. Sandbox construction now requires `--unshare-user` explicitly instead of relying on the optional user-namespace behavior of `--unshare-all`. The production worker host itself does not yet enforce a separate OS UID.
+
 The [confidential host oracle driver](docs/CONFIDENTIAL_ORACLE.md) adds an opt-in deterministic stdin-to-stdout verification path. A private host retains expected results and runs candidate code without mounting the hidden oracle. The C11 receipt bridge now refuses legacy oracle-mounted receipts for verification transitions. Only mocked-process offline tests are available; real namespace isolation and authenticated host provenance remain unverified.
 
 The [trusted worker host](docs/HOST_WORKER_ISOLATION.md) now stages a pinned candidate in a network-disconnected bubblewrap worker namespace **without mounting the oracle, manifest, receipts, or C11 database**. It outputs an unverified candidate snapshot. Its 11 offline tests use mocked sandbox execution; real OS-isolation acceptance has not been run.
