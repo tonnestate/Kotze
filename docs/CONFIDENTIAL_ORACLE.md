@@ -4,7 +4,7 @@ Status: a narrow host-private exact-output protocol exists with offline mocked-p
 
 ## Security boundary
 
-The trusted host retains the frozen manifest, private expected outputs, candidate digest, C11 database and receipt ledger. Candidate code runs in a fresh bubblewrap namespace for each test case. The mount command exposes the candidate /work, private /tmp, and limited system runtimes. It does NOT mount /oracle, the receipt ledger, the manifest or C11 DB.
+The trusted host retains the frozen manifest, private expected outputs, candidate digest, C11 database and receipt ledger. Phase 2.0 additionally requires the host to drop to a distinct, existing non-root `--worker-uid` and its primary `--worker-gid` for each candidate test; the trusted scratch root is mode 0711 to permit traversal without read/list/write access. Candidate code runs in a fresh bubblewrap namespace for each test case. The mount command exposes the candidate /work, private /tmp, and limited system runtimes. It does NOT mount /oracle, the receipt ledger, the manifest or C11 DB.
 
 Only a bounded case input is provided through stdin. Candidate output and exit status return to the host, which compares the exact stdout bytes against the private expected bytes. The candidate does not choose a verdict or receive the expected output. Inputs are necessarily visible to the candidate. Reused holdouts can be memorized, so secrecy is not the same as independent test quality.
 
