@@ -152,9 +152,10 @@ def grade(*, trusted: Path, manifest: Path, oracle: Path, candidate: Path,
           candidate_tree_sha256: str, worker_uid: int, worker_gid: int) -> dict:
     if sys.platform != 'linux':
         raise sg.ContractError('Linux isolation required')
-    bwrap = shutil.which('bwrap')
-    if bwrap is None:
-        raise sg.ContractError('bubblewrap absent: no unsandboxed fallback')
+    try:
+        bwrap = hc.trusted_bwrap_path()
+    except hc.Refused as exc:
+        raise sg.ContractError(str(exc)) from exc
     hc.require_worker_identity(worker_uid, worker_gid)
     if arm not in sg.ARMS:
         raise sg.ContractError('Unknown study arm')
