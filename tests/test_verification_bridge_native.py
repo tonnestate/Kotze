@@ -45,7 +45,8 @@ class NativeReceiptIntegrationTests(unittest.TestCase):
             "seed": 42, "arms": ["BASE", "SKILL"], "tasks": [{
                 "task_id": "task-1", "base_sha": self.base,
                 "oracle_sha256": self.o_hash, "protected_paths": ["test.py"],
-                "runner": ["/usr/bin/python3", "/oracle/test.py"]
+                "runner": ["/usr/bin/python3", "/oracle/test.py"],
+                "case_protocol": "host-oracle-stdin-v1"
             }]
         }))
         self.manifest_hash = grader.load_study(self.manifest)[1]
@@ -88,7 +89,9 @@ class NativeReceiptIntegrationTests(unittest.TestCase):
             "candidate_tree_sha256": self.c_hash, "state": outcome,
             "reason": reason, "exit_code": exit_code,
             "sandbox": "linux-bubblewrap-unshare-all",
-            "independent_execution_attestation": "TRUSTED_HOST_CONFIGURATION_REQUIRED"
+            "independent_execution_attestation": "TRUSTED_HOST_CONFIGURATION_REQUIRED",
+            "grader_protocol": "host-oracle-stdin-v1", "oracle_visibility": "host-only",
+            "case_count": 2, "passed_cases": 2 if outcome == "PASS" else 0
         }
         self.receipts.write_text(json.dumps(record) + "\n")
         return record
