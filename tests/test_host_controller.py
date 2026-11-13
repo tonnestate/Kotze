@@ -164,6 +164,12 @@ class HostControllerTests(unittest.TestCase):
             with self.assertRaisesRegex(h.Refused, 'positive non-root'):
                 h.require_worker_identity(0, 65534, self.worker_root)
 
+    def test_rejects_worker_owned_or_group_writable_staging_parent(self):
+        # A worker-controlled parent would permit directory swaps before the host seal.
+        with patch.object(h.os, 'geteuid', return_value=0):
+            with self.assertRaisesRegex(h.Refused, 'host-owned'):
+                h.require_worker_identity(65534, 65534, self.worker_root)
+
     def test_worker_root_must_not_overlap_host_private_storage(self):
         self.args['worker_root'] = self.trusted
         with patch.object(h.shutil, 'which', return_value='/usr/bin/bwrap'):
