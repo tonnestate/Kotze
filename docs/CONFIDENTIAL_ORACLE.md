@@ -40,7 +40,7 @@ Run on the trusted host only:
 
 ## Native bridge
 
-The verification bridge rejects legacy receipts for C11 verify transitions and requires the host-oracle-stdin-v1 protocol, oracle_visibility=host-only and bounded case counts, with all cases passed for PASS. These fields are a contract, not a cryptographic host attestation. The worker must never have direct C11 database, verifier-role CLI, or receipt-ledger access.
+The verification bridge rejects legacy receipts for C11 verify transitions and requires the host-oracle-stdin-v1 protocol, oracle_visibility=host-only and bounded case counts, with all cases passed for PASS. It also reads the sealed private oracle case file and refuses any receipt whose case_count differs from the actual frozen case count. These fields are a contract, not a cryptographic host attestation. The worker must never have direct C11 database, verifier-role CLI, or receipt-ledger access.
 
 ## Evidence and limitations
 
