@@ -31,7 +31,7 @@ CHECKS = frozenset({
     'host_env_absent', 'host_env_proc_absent', 'host_network_inaccessible',
     'net_namespace_distinct', 'pid_namespace_distinct',
     'mount_namespace_distinct', 'user_namespace_distinct',
-    'host_ledger_unwritable',
+    'host_ledger_unwritable', 'worker_uid_mapping',
 })
 
 # This script runs ONLY in the synthetic candidate namespace, never on the host.
@@ -64,9 +64,15 @@ for label in ('oracle', 'receipt', 'database', 'manifest'):
 checks['host_ledger_unwritable'] = cannot_write(c['paths']['receipt'])
 checks['host_env_absent'] = os.environ.get('KOTZE_PRIVATE_CANARY') is None
 try:
-    checks['host_env_proc_absent'] = c['secret'] not in pathlib.Path('/proc/self/environ').read_bytes().decode('utf-8', 'replace')
+    checks['host_env_proc_absent'] = b'KOTZE_PRIVATE_CANARY=' not in pathlib.Path('/proc/self/environ').read_bytes()
 except OSError:
     checks['host_env_proc_absent'] = False
+try:
+    uid_map = [list(map(int, line.split())) for line in pathlib.Path('/proc/self/uid_map').read_text().splitlines()]
+    checks['worker_uid_mapping'] = (len(uid_map) == 1 and uid_map[0][1] == c['worker_uid']
+                                   and uid_map[0][2] == 1 and uid_map[0][1] != 0)
+except (OSError, ValueError, IndexError):
+    checks['worker_uid_mapping'] = False
 for name in ('net', 'pid', 'mnt', 'user'):
     label = 'mount' if name == 'mnt' else name
     try:
@@ -153,10 +159,13 @@ def run(*, worker_uid: int, worker_gid: int, scratch_root: Path,
             listener.bind(('127.0.0.1', 0))
             listener.listen(1)
             port = listener.getsockname()[1]
-            config = {'nonce': nonce, 'secret': canary, 'paths': files,
+            # Never disclose even synthetic expected canary values through /work.
+            config = {'nonce': nonce, 'paths': files, 'worker_uid': worker_uid,
                       'namespaces': namespaces, 'port': port}
             (stage / 'probe-config.json').write_text(json.dumps(config))
             (stage / 'probe.py').write_text(CHILD)
+            if canary.encode() in (stage / 'probe-config.json').read_bytes():
+                raise Refused('Synthetic canary leaked into worker-visible configuration')
             for item in stage.iterdir():
                 item.chmod(0o444)
             command = worker_command(str(bwrap), stage, ['/usr/bin/python3', '-B', '/work/probe.py'])
@@ -167,7 +176,7 @@ def run(*, worker_uid: int, worker_gid: int, scratch_root: Path,
                 p = subprocess.Popen(command, stdin=subprocess.DEVNULL,
                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                      user=worker_uid, group=worker_gid, extra_groups=[],
-                                     env={**os.environ, 'KOTZE_PRIVATE_CANARY': canary},
+                                     env={'PATH': '/usr/bin:/bin', 'KOTZE_PRIVATE_CANARY': canary},
                                      start_new_session=True, close_fds=True)
                 try:
                     stdout, stderr = p.communicate(timeout=12)
@@ -178,6 +187,8 @@ def run(*, worker_uid: int, worker_gid: int, scratch_root: Path,
             except OSError as exc:
                 raise Refused('Real sandbox could not start') from exc
             try:
+                if canary.encode() in stdout:
+                    raise Refused('Host synthetic canary appeared in candidate output')
                 checks = validate_child(stdout, p.returncode, nonce)
             except Refused as exc:
                 # Diagnostics exclude stdout (which an untrusted process controls).
