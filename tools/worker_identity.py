@@ -38,7 +38,7 @@ def require_traversable_scratch(path: Path) -> Path:
         raise IdentityRefused("Scratch root must be a real directory")
     root = path.resolve(strict=True)
     info = root.stat()
-    if (info.st_uid != os.geteuid() or info.st_mode & 0o022
+    if (info.st_uid != os.geteuid() or info.st_mode & 0o066
             or (info.st_mode & 0o111) != 0o111):
         raise IdentityRefused("Scratch root must be host-owned, non-writable and traversable (0711)")
     return root
