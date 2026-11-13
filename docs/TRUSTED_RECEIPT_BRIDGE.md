@@ -52,6 +52,15 @@ After the independent grade, run from the trusted host:
 
 No network, model inference or CI is launched by the bridge.
 
+## Receipt ledger hardening
+
+The receipt writer now locks, validates and reads the **same open inode** before
+append, avoiding a reopen-by-path race. It refuses symlinks, hardlinks and
+group/world-accessible or non-host-owned ledger files. New ledgers are created
+0600. The trusted host must also protect the parent directory and control
+process identity; these checks do not prove a sandboxed worker could not
+impersonate the host.
+
 ## Unresolved security and integration gaps
 
 - The existing grader exposes /oracle read-only inside the executing candidate's
@@ -74,7 +83,13 @@ No network, model inference or CI is launched by the bridge.
 
     make check
 
-Seven new offline tests cover positive receipt binding (mocked reducer), changed
+Seven original offline tests plus a ledger-permission regression test cover positive receipt binding (mocked reducer), changed
 candidate, forged PASS exit, wrong C11 candidate identity, duplicate receipts,
 FAIL/INCONCLUSIVE routing and candidate-owned ledger rejection. Existing C11 and
 grader tests run separately. No GitHub Actions or hosted CI are introduced.
+
+Four additional offline integration cases invoke the real C11 binary for
+PASS, FAIL, INCONCLUSIVE and stale-candidate rejection. They are wired into
+local `make check`, but have not been executed in this environment against a
+full repository build. A synthetic receipt is **not** a genuine bubblewrap
+execution receipt and proves no production-grade isolation.
