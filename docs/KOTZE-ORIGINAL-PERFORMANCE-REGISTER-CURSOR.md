@@ -1,7 +1,7 @@
 # KOTZE Original — Performance, C11 Registry/Cursor and Concurrent Execution
 
 **Stand:** 13. November 2026  
-**Status:** erster nativer C11-Register-/Cursor-Slice als Quellcode vorhanden; noch kein Scheduler, keine Kompilierung, keine Tests und keine gemessene Performanceverbesserung.  
+**Status:** Register-/Cursor-Slice und begrenzter nativer asynchroner Read-Scheduler als Quellcode vorhanden; keine Kompilierung, keine Tests und keine gemessene Performanceverbesserung.  
 **Scope:** Original-KOTZE für autonome Softwareentwicklung. Kein Import der StrawberryMe/OGI/AVCOS-Laufzeit, kein zweiter Organisations-/Capability-Katalog.  
 **Budget-Regel:** Keine Cloud-/Modellaufrufe, CI/Actions oder Benchmarkläufe durch diese Dokumentationsänderung.
 
@@ -102,3 +102,42 @@ Die neue Library `include/kotze_register.h` und `src/kotze_register.c` verwendet
 **Vorläufige Grenze:** Der Register-Write-API fehlt weiterhin die OS-basierte Authentifizierung des vertrauenswürdigen Hosts. Worker dürfen daher weder Registerdatei noch schreibfähige API erhalten. Das Register ist ein Index, keine unabhängige Oracle-/Verifikationsinstanz. Read-Handles sind pro Thread separat zu führen. SQLite-WAL unterstützt gleichzeitige Leser und genau einen jeweils aktiven Schreiber; es gibt noch keinen C11-Threadpool, keine adaptive Horizon-Erweiterung und keine gemessene Latenzverbesserung.
 
 `tests/test_register.c` enthält deterministische Testfälle für Idempotenz, Referenzintegrität, gerichtete Kanten, Keyset-Pagination, Generation-Konflikte, Versionswechsel und Neustart. **Nicht ausgeführt**; weder lokal noch über CI.
+
+
+## H. Begrenzter nativer Async-Reader (neu, noch ungetestet)
+
+Die neuen Dateien \`include/kotze_async.h\`, \`src/kotze_async.c\` und
+\`tests/test_async.c\` implementieren einen kleinen nativen POSIX-Threadpool
+(**1–8 Reader**, **1–128 Gesamtslots** einschließlich nicht abgeholter
+Ergebnisse). Die einzigen erlaubten Auftragstypen sind \`KA_ENTRY\`
+und \`KA_EDGES\`. Sie rufen ausschließlich die bisherigen read-only
+\`kr_cursor_read\` und \`kr_cursor_edges\` auf. Jeder Worker öffnet über
+\`kr_open_reader\` eine eigene **SQLite-READONLY-Verbindung**, ohne Tabellen
+anzulegen oder SQLite-Schreibrechte zu besitzen.
+
+Der Host reicht versionsgebundene Cursor als Wert ein. \`ka_submit_entry\`
+und \`ka_submit_edges\` geben Tickets zurück. \`ka_poll\`/ \`ka_wait\` lesen
+Ergebnisse; \`ka_reap\` gibt Speicher erst nach Abholung frei. Bei voll
+belegten Slots gilt sofortiges **\`KA_FULL\`** statt unkontrollierten
+Speicherwachstums. \`ka_cancel\` löscht logische Aufträge/Ergebnisse;
+laufende Datenbankabfragen müssen nicht unterbrochen werden, späte
+Ergebnisse können den bereits wiederverwendeten Slot aufgrund der
+unterschiedlichen Tickets jedoch nicht überschreiben.
+
+**Versionseffekt:** \`KA_OK\` heißt nur: der asynchrone Task ist
+abgeschlossen. \`result.register_status\` enthält separat \`KR_OK\`,
+\`KR_CONFLICT\` (z. B. veralteter Cursor) oder einen Fehler. Ein
+abgelaufener oder geändert erfasster Cursor wird **nicht** stillschweigend
+auf eine neue Revision umgebogen. Das Register prüft die Version innerhalb
+der zugehörigen kurzen SQLite-Lesetransaktion. Ein zwischen
+Commit/Snapshot und späterem Consumer-Schritt erfolgter Datenwechsel
+muss am nächsten sicherheitskritischen Admission-Gate erneut überprüft werden.
+
+**Ausdrückliche Grenzen:** Keine externe Tool-Ausführung, kein LLM,
+keine Änderung an den C11-FSM-Gates, keine persistente Job-Queue,
+keine Cross-Process-Wiederaufnahme, kein geschützter Verifier und
+keine OS-Sandbox. Ein Threadpool bietet **keine**
+Sicherheitsisolation. Der Host muss vor der Übergabe die Work-Rechte,
+Zugriffskontrolle und Cost-/Rate-Budgets sicherstellen. \`ka_close\`
+darf nicht parallel zu einem noch aktiven API-Aufruf erfolgen.
+**Die Testfälle wurden ausschließlich ergänzt, nicht ausgeführt.**

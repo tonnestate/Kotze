@@ -20,6 +20,11 @@ typedef struct {
 
 /* Must open a database initialized by kotze_open(). One handle per thread. */
 int kr_open(kotze_register_t **out, const char *db_path);
+
+/* Dedicated query-only connection for async native readers. This opens the
+ * already initialized registry with SQLITE_OPEN_READONLY; it never migrates
+ * or creates tables. Use one handle per worker thread. */
+int kr_open_reader(kotze_register_t **out, const char *db_path);
 void kr_close(kotze_register_t *r);
 const char *kr_error(const kotze_register_t *r);
 

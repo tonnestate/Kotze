@@ -106,6 +106,33 @@ int kr_open(kotze_register_t **out,const char *path){
 error:
     sqlite3_close(r->db);free(r);return KR_ERROR;
 }
+
+int kr_open_reader(kotze_register_t **out,const char *path){
+    if(!out||!valid(path,4096))return KR_DENIED;
+    *out=NULL;
+    kotze_register_t *r=calloc(1,sizeof(*r));
+    if(!r)return KR_ERROR;
+    if(sqlite3_open_v2(path,&r->db,SQLITE_OPEN_READONLY|SQLITE_OPEN_NOMUTEX,
+                       NULL)!=SQLITE_OK)goto error;
+    sqlite3_busy_timeout(r->db,5000);
+    sqlite3_stmt *s=NULL;
+    /* Required tables must already exist. Never initialize schema here. */
+    if(sqlite3_prepare_v2(r->db,
+        "SELECT w.revision,w.evidence_epoch,e.object_key,g.generation"
+        " FROM works w LEFT JOIN register_entries e ON e.work_id=w.id"
+        " LEFT JOIN register_generations g ON g.work_id=w.id LIMIT 0",
+        -1,&s,NULL)!=SQLITE_OK){
+        sqlite3_finalize(s);goto error;
+    }
+    sqlite3_finalize(s);
+    *out=r;
+    return KR_OK;
+error:
+    sqlite3_close(r->db);
+    free(r);
+    return KR_ERROR;
+}
+
 void kr_close(kotze_register_t *r){if(r){sqlite3_close(r->db);free(r);}}
 const char *kr_error(const kotze_register_t *r){return r?r->error:"null registry";}
 
