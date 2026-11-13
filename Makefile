@@ -15,5 +15,6 @@ check: build/test-core
 	./build/test-core
 	python3 -m unittest discover -s tests -p "test_skill_grader.py" -v
 	python3 -m unittest discover -s tests -p "test_gemma_worker.py" -v
+	python3 -m unittest discover -s tests -p "test_verification_bridge.py" -v
 clean:
 	rm -rf build
