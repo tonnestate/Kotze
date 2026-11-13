@@ -20,6 +20,8 @@ import sys
 import tempfile
 import time
 
+import worker_identity as identity
+
 SCHEMA = 'kotze.worker-stage.v1'
 STUDY_SCHEMA = 'kotze.skill-study.v1'
 MAX_FILES = 10000
@@ -154,12 +156,11 @@ def worker_command(bwrap: str, workspace: Path, argv: list[str]) -> list[str]:
 def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
                source: Path, expected_source_sha256: str, scratch: Path,
                publish_parent: Path, output_name: str, argv: list[str],
-               timeout: int = 120) -> dict:
+               timeout: int = 120, worker_uid: int, worker_gid: int) -> dict:
     if os.name != 'posix' or sys.platform != 'linux':
         raise Refused('Linux namespace sandbox required')
-    bwrap = shutil.which('bwrap')
-    if not bwrap:
-        raise Refused('bubblewrap absent; unsandboxed worker forbidden')
+    bwrap = identity.require_trusted_bwrap(shutil.which('bwrap'))
+    identity.require_worker_identity(worker_uid, worker_gid)
     if arm not in ('BASE', 'SKILL') or type(timeout) is not int or not 1 <= timeout <= 300:
         raise Refused('Invalid arm or worker timeout')
     if not output_name or output_name in ('.', '..') or '/' in output_name or '\\' in output_name:
@@ -167,7 +168,7 @@ def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
     if len(expected_source_sha256) != 64 or any(c not in '0123456789abcdef' for c in expected_source_sha256):
         raise Refused('Source must be pinned by SHA-256')
     trusted = strict_dir(trusted, private=True)
-    source, scratch, publish_parent = (strict_dir(source), strict_dir(scratch, private=True),
+    source, scratch, publish_parent = (strict_dir(source), identity.require_traversable_scratch(scratch),
                                        strict_dir(publish_parent, private=True))
     manifest_resolved = manifest.resolve(strict=True)
     if not within(manifest_resolved, trusted):
@@ -188,11 +189,13 @@ def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
     if source_sha != expected_source_sha256:
         raise Refused('Source tree hash differs from trusted pin')
     with tempfile.TemporaryDirectory(prefix='.kotze-worker-', dir=scratch) as tmp:
+        Path(tmp).chmod(0o711)  # Host-owned, traverse-only path for a different worker UID.
         workspace = Path(tmp) / 'work'
         workspace.mkdir(mode=0o700)
         clone_tree(source, workspace, excluded)
         if digest_tree(source) != source_sha:
             raise Refused('Source changed during staging')
+        identity.prepare_worker_stage(workspace, worker_uid, worker_gid)
         command = worker_command(bwrap, workspace, argv)
         stdout = Path(tmp) / 'stdout'
         stderr = Path(tmp) / 'stderr'
@@ -204,8 +207,11 @@ def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
             resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
         try:
             with stdout.open('wb') as out, stderr.open('wb') as err:
+                stdout.chmod(0o600)
+                stderr.chmod(0o600)
                 proc = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
-                                        close_fds=True, start_new_session=True, preexec_fn=limits)
+                                        close_fds=True, start_new_session=True, preexec_fn=limits,
+                                        **identity.worker_process_options(worker_uid, worker_gid))
                 try:
                     status = proc.wait(timeout=timeout)
                 except subprocess.TimeoutExpired:
@@ -233,7 +239,8 @@ def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
                 'manifest_sha256': manifest_sha, 'input_tree_sha256': source_sha,
                 'candidate_tree_sha256': candidate_sha, 'output': str(output),
                 'worker_exit_code': status, 'worker_elapsed_seconds': round(time.monotonic()-start, 6),
-                'verified': False, 'oracle_mounted': False}
+                'verified': False, 'oracle_mounted': False,
+                'worker_host_uid': worker_uid, 'worker_host_gid': worker_gid}
 
 
 def main() -> int:
@@ -243,12 +250,14 @@ def main() -> int:
     for name in ('task_id', 'arm', 'expected_source_sha256', 'output_name'):
         p.add_argument('--' + name.replace('_', '-'), required=True)
     p.add_argument('--timeout', type=int, default=120)
+    p.add_argument('--worker-uid', type=int, required=True)
+    p.add_argument('--worker-gid', type=int, required=True)
     p.add_argument('argv', nargs=argparse.REMAINDER)
     a = vars(p.parse_args())
     a['argv'] = a['argv'][1:] if a['argv'][:1] == ['--'] else a['argv']
     try:
         result = run_worker(**a)
-    except (Refused, OSError, ValueError, json.JSONDecodeError) as exc:
+    except (Refused, identity.IdentityRefused, OSError, ValueError, json.JSONDecodeError) as exc:
         print(f'WORKER_HOST_REFUSED: {exc}', file=sys.stderr)
         return 2
     print(json.dumps(result, sort_keys=True))

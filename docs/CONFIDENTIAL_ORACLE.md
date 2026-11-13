@@ -35,7 +35,8 @@ Run on the trusted host only:
       --candidate /srv/kotze/candidates/task-001-skill \
       --scratch /srv/kotze/scratch \
       --receipts /srv/kotze/trusted/receipts.jsonl \
-      --task-id task-001 --arm SKILL \
+      --task-id task-001 --arm SKILL \\
+      --worker-uid <dedicated-uid> --worker-gid <dedicated-gid> \
       --candidate-tree-sha256 <exact-kotze-tree-digest>
 
 ## Native bridge

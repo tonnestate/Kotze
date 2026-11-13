@@ -87,6 +87,25 @@ class LiveProbeContractTests(unittest.TestCase):
                               bwrap=root / 'nonexistent-bwrap')
                     spawn.assert_not_called()
 
+    def test_public_probe_config_does_not_expose_canary(self):
+        value = 'SYNTHETIC_CANARY_DO_NOT_SHARE'
+        config = p.public_probe_config(nonce='nonce', files={'oracle': '/host/oracle'},
+                                       namespaces={'user': 'user:[1]'}, port=9001,
+                                       worker_uid=2077)
+        self.assertEqual(config['worker_uid'], 2077)
+        self.assertNotIn('secret', config)
+        self.assertNotIn(value, json.dumps(config))
+        self.assertNotIn("c['secret']", p.CHILD)
+
+    def test_separate_worker_uid_mapping_is_mandatory(self):
+        self.assertIn('worker_uid_mapping', p.CHECKS)
+        self.assertIn('/proc/self/uid_map', p.CHILD)
+        result = dict(schema='kotze.isolation-probe-child.v1', nonce='nonce',
+                      checks={name: True for name in p.CHECKS})
+        result['checks']['worker_uid_mapping'] = False
+        with self.assertRaisesRegex(hc.Refused, 'mandatory'):
+            p.validate_child(json.dumps(result).encode(), 0, 'nonce')
+
     def test_valid_evidence_contract_but_not_live_proof(self):
         record = dict(schema='kotze.isolation-probe-child.v1', nonce='nonce',
                       checks={name: True for name in p.CHECKS})

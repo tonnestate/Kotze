@@ -19,6 +19,25 @@ class HostControllerTests(unittest.TestCase):
         self.trusted, self.source, self.scratch, self.publish = [root / p for p in ('trusted', 'source', 'scratch', 'published')]
         for path in (self.trusted, self.source, self.scratch, self.publish):
             path.mkdir(mode=0o700)
+        self.scratch.chmod(0o711)
+        # These tests mock process launch; identity enforcement has its own tests.
+        for name, result in (
+            ('require_worker_identity', (2077, 2077)),
+            ('worker_process_options', {'user': 2077, 'group': 2077, 'extra_groups': [], 'umask': 0o077,
+                                        'env': {'PATH': '/usr/bin:/bin', 'HOME': '/tmp'}}),
+            ('prepare_worker_stage', None),
+        ):
+            patcher = patch.object(h.identity, name, return_value=result)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        def fake_bwrap(raw):
+            if not raw:
+                raise h.identity.IdentityRefused('Bubblewrap absent: unsandboxed execution is forbidden')
+            return '/usr/bin/bwrap'
+        patcher = patch.object(h.identity, 'require_trusted_bwrap',
+                               side_effect=fake_bwrap)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         (self.trusted / 'oracle').mkdir(mode=0o700)
         (self.trusted / 'oracle' / 'test.py').write_text('assert SECRET_DO_NOT_LEAK\n')
         (self.source / 'src.py').write_text('print(123)\n')
@@ -33,7 +52,8 @@ class HostControllerTests(unittest.TestCase):
         self.args = dict(trusted=self.trusted, manifest=self.manifest, task_id='t', arm='BASE',
                          source=self.source, expected_source_sha256=h.digest_tree(self.source),
                          scratch=self.scratch, publish_parent=self.publish,
-                         output_name='candidate-1', argv=['/usr/bin/python3', '-c', 'print(1)'])
+                         output_name='candidate-1', argv=['/usr/bin/python3', '-c', 'print(1)'],
+                         worker_uid=2077, worker_gid=2077)
 
     def run_mocked(self, modify=None, returncode=0):
         events = []
@@ -43,6 +63,10 @@ class HostControllerTests(unittest.TestCase):
                 return returncode
         def fake_spawn(cmd, **kwargs):
             events.append(cmd)
+            self.assertEqual(kwargs.get('user'), 2077)
+            self.assertEqual(kwargs.get('group'), 2077)
+            self.assertEqual(kwargs.get('extra_groups'), [])
+            self.assertNotIn('PRIVATE_HOST_SECRET', kwargs.get('env', {}))
             self.assertIn('--unshare-all', cmd)
             self.assertIn('--unshare-user', cmd)
             self.assertIn('--unshare-net', cmd)
@@ -83,7 +107,7 @@ class HostControllerTests(unittest.TestCase):
     def test_no_unsandboxed_fallback(self):
         with patch.object(h.shutil, 'which', return_value=None):
             with patch.object(h.subprocess, 'Popen') as run:
-                with self.assertRaisesRegex(h.Refused, 'bubblewrap absent'):
+                with self.assertRaisesRegex(h.identity.IdentityRefused, 'Bubblewrap absent'):
                     h.run_worker(**self.args)
                 run.assert_not_called()
 
@@ -130,7 +154,7 @@ class HostControllerTests(unittest.TestCase):
     def test_refuses_non_host_private_scratch(self):
         self.scratch.chmod(0o755)
         with patch.object(h.shutil, 'which', return_value='/usr/bin/bwrap'):
-            with self.assertRaisesRegex(h.Refused, 'privately owned'):
+            with self.assertRaisesRegex(h.identity.IdentityRefused, '0711'):
                 h.run_worker(**self.args)
 
     def test_rejects_absolute_or_traversing_protected_path(self):
