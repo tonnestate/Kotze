@@ -1,5 +1,7 @@
 # Confidential host oracle — phase 1.8
 
+> Phase 2.0: confidential grader candidate execution now requires explicit --worker-root, --worker-uid and --worker-gid; stage ownership and host-only logs are separated, with no same-UID fallback. See [Host Identity Repair](HOST_IDENTITY_REPAIR.md).
+
 Status: a narrow host-private exact-output protocol exists with offline mocked-process tests. It is not an authenticated production verifier or a general-purpose arbitrary-repository grader.
 
 ## Security boundary
