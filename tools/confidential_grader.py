@@ -102,50 +102,54 @@ def sealed_candidate(candidate: Path, protected: set[Path]) -> None:
 
 def execute_one(*, bwrap: str, candidate: Path, scratch: Path, argv: list[str],
                 input_data: bytes, timeout: float, expected: bytes,
-                protected: set[Path]) -> tuple[str, int | None]:
-    with tempfile.TemporaryDirectory(prefix='.kotze-oracle-case-', dir=scratch) as tmp:
-        work = Path(tmp) / 'work'
-        work.mkdir(mode=0o700)
-        hc.clone_tree(candidate, work, protected)
+                protected: set[Path], worker_root: Path,
+                worker_uid: int, worker_gid: int) -> tuple[str, int | None]:
+    # Candidate code runs under the same distinct host UID as the worker stage.
+    # Host-private logs live in scratch; the candidate has no directory access.
+    with hc.worker_stage(candidate, worker_root, worker_uid, worker_gid, protected) as work:
         sealed_candidate(work, protected)
         command = hc.worker_command(bwrap, work, argv)
-        stdout_file, stderr_file = Path(tmp) / 'stdout', Path(tmp) / 'stderr'
+        with tempfile.TemporaryDirectory(prefix='.kotze-host-case-', dir=scratch) as tmp:
+            stdout_file, stderr_file = Path(tmp) / 'stdout', Path(tmp) / 'stderr'
 
-        def limits() -> None:
-            resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_OUTPUT_BYTES, MAX_OUTPUT_BYTES))
-            resource.setrlimit(resource.RLIMIT_CPU, (max(1, int(timeout) * 2), max(1, int(timeout) * 2)))
-            resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
-            resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+            def limits() -> None:
+                resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_OUTPUT_BYTES, MAX_OUTPUT_BYTES))
+                resource.setrlimit(resource.RLIMIT_CPU, (max(1, int(timeout) * 2), max(1, int(timeout) * 2)))
+                resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
+                resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
-        try:
-            with stdout_file.open('wb') as out, stderr_file.open('wb') as err:
-                process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=out,
-                                           stderr=err, close_fds=True, start_new_session=True,
-                                           preexec_fn=limits)
-                try:
-                    process.communicate(input=input_data, timeout=timeout)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait()
+            try:
+                with stdout_file.open('wb') as out, stderr_file.open('wb') as err:
+                    process = subprocess.Popen(
+                        command, stdin=subprocess.PIPE, stdout=out, stderr=err,
+                        close_fds=True, start_new_session=True, preexec_fn=limits,
+                        user=worker_uid, group=worker_gid, extra_groups=[],
+                        env={'PATH': '/usr/bin:/bin', 'HOME': '/tmp'})
+                    try:
+                        process.communicate(input=input_data, timeout=timeout)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        process.wait()
+                        return 'INCONCLUSIVE', None
+                if stdout_file.stat().st_size > MAX_OUTPUT_BYTES or stderr_file.stat().st_size > MAX_OUTPUT_BYTES:
                     return 'INCONCLUSIVE', None
-            if stdout_file.stat().st_size > MAX_OUTPUT_BYTES or stderr_file.stat().st_size > MAX_OUTPUT_BYTES:
+                code = process.returncode
+                if code is None or code in (125, 126, 127) or code < 0:
+                    return 'INCONCLUSIVE', None
+                if code != 0:
+                    return 'FAIL', code
+                observed = stdout_file.read_bytes()
+                if hmac.compare_digest(observed, expected):
+                    return 'PASS', 0
+                return 'FAIL', 1
+            except (OSError, ValueError):
                 return 'INCONCLUSIVE', None
-            code = process.returncode
-            if code is None or code in (125, 126, 127) or code < 0:
-                return 'INCONCLUSIVE', None
-            if code != 0:
-                return 'FAIL', code
-            observed = stdout_file.read_bytes()
-            if hmac.compare_digest(observed, expected):
-                return 'PASS', 0
-            return 'FAIL', 1
-        except (OSError, ValueError):
-            return 'INCONCLUSIVE', None
 
 
 def grade(*, trusted: Path, manifest: Path, oracle: Path, candidate: Path,
           scratch: Path, receipts: Path, task_id: str, arm: str,
-          candidate_tree_sha256: str) -> dict:
+          candidate_tree_sha256: str, worker_root: Path,
+          worker_uid: int, worker_gid: int) -> dict:
     if sys.platform != 'linux':
         raise sg.ContractError('Linux isolation required')
     bwrap = shutil.which('bwrap')
@@ -155,6 +159,10 @@ def grade(*, trusted: Path, manifest: Path, oracle: Path, candidate: Path,
         raise sg.ContractError('Unknown study arm')
     trusted, manifest, oracle, candidate, scratch, receipts = safe_paths(
         trusted, manifest, oracle, candidate, scratch, receipts)
+    worker_root = hc.require_worker_identity(worker_uid, worker_gid, worker_root)
+    for path in (trusted, oracle, candidate, scratch):
+        if hc.within(worker_root, path) or hc.within(path, worker_root):
+            raise sg.ContractError('Worker staging root overlaps trusted or candidate storage')
     study, digest = sg.load_study(manifest)
     task = sg.task_of(study, task_id)
     if task.get('case_protocol') != PROTOCOL:
@@ -185,7 +193,9 @@ def grade(*, trusted: Path, manifest: Path, oracle: Path, candidate: Path,
             break
         state, exit_code = execute_one(bwrap=bwrap, candidate=candidate, scratch=scratch,
                                        argv=argv, input_data=input_data, timeout=remaining,
-                                       expected=expected, protected=protected)
+                                       expected=expected, protected=protected,
+                                       worker_root=worker_root,
+                                       worker_uid=worker_uid, worker_gid=worker_gid)
         if state != 'PASS':
             reason = 'TRUSTED_RUNNER_EXIT' if state == 'FAIL' else 'HOST_TEST_INCONCLUSIVE'
             break
@@ -203,6 +213,7 @@ def grade(*, trusted: Path, manifest: Path, oracle: Path, candidate: Path,
         'independent_execution_attestation': 'TRUSTED_HOST_CONFIGURATION_REQUIRED',
         'grader_protocol': PROTOCOL, 'oracle_visibility': 'host-only',
         'case_count': len(cases), 'passed_cases': passed,
+        'worker_host_uid': worker_uid, 'worker_host_gid': worker_gid,
     }
     sg.append_receipt(receipts, record)
     return record
@@ -210,10 +221,12 @@ def grade(*, trusted: Path, manifest: Path, oracle: Path, candidate: Path,
 
 def main() -> int:
     parser = argparse.ArgumentParser(description='KOTZE confidential host oracle driver (stdin-exact-v1)')
-    for name in ('trusted', 'manifest', 'oracle', 'candidate', 'scratch', 'receipts'):
+    for name in ('trusted', 'manifest', 'oracle', 'candidate', 'scratch', 'receipts', 'worker_root'):
         parser.add_argument('--' + name, required=True, type=Path)
     for name in ('task_id', 'arm', 'candidate_tree_sha256'):
         parser.add_argument('--' + name.replace('_', '-'), required=True)
+    parser.add_argument('--worker-uid', type=int, required=True)
+    parser.add_argument('--worker-gid', type=int, required=True)
     args = parser.parse_args()
     try:
         result = grade(**vars(args))
