@@ -429,14 +429,20 @@ int kotze_admit_action(kotze_t *k,const char *work_id,const char *action_id,
 int kotze_finish_action(kotze_t *k,const char *action_id,const char *outcome_digest){
     if(!k||!valid(action_id,128)||!valid(outcome_digest,128))return KOTZE_DENIED;
     if(begin(k)<0)return KOTZE_ERROR;
-    sqlite3_stmt *s=NULL;int rc=prepare(k,&s,"SELECT state,outcome_digest,operation FROM actions WHERE action_id=?");if(rc<0)return commit(k,rc);
+    sqlite3_stmt *s=NULL;int rc=prepare(k,&s,"SELECT state,outcome_digest,operation,fingerprint FROM actions WHERE action_id=?");if(rc<0)return commit(k,rc);
     bind(s,1,action_id);int step=sqlite3_step(s);
     if(step!=SQLITE_ROW){sqlite3_finalize(s);return commit(k,fail(k,KOTZE_DENIED,"Unknown action"));}
     int reserved=eq((const char*)sqlite3_column_text(s,0),"RESERVED");
     int same=eq((const char*)sqlite3_column_text(s,0),"FINISHED")&&eq((const char*)sqlite3_column_text(s,1),outcome_digest);
     int effectful=eq((const char*)sqlite3_column_text(s,2),"WRITE")||
                   eq((const char*)sqlite3_column_text(s,2),"NETWORK");
+    /* Probe fingerprints belong to the fenced host-only bridge; a CLI caller
+     * may not bypass the claim/receipt ledger via ordinary READ finish. */
+    const char *fp=(const char*)sqlite3_column_text(s,3);
+    int probe=fp && !strncmp(fp,"probe:v1:",9);
     sqlite3_finalize(s);
+    if(probe)return commit(k,fail(k,KOTZE_DENIED,
+        "Probe action must finish via trusted fenced bridge"));
     if(!reserved)return commit(k,same?KOTZE_REPLAY:fail(k,KOTZE_CONFLICT,"Action already closed"));
     if(effectful)return commit(k,fail(k,KOTZE_DENIED,
         "Effectful actions must finish through the durable dispatcher"));

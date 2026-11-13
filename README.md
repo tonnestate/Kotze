@@ -59,6 +59,18 @@ descriptors and output. This is NOT a complete sandbox or verifier. See
 [Git diagnostic runner contract](docs/KOTZE-ORIGINAL-TOOL-RUNNER.md).
 Code and offline test cases have not been executed.
 
+## Durable probe-action bridge (host-only)
+
+A native SQLite bridge now binds fixed diagnostic recipes to **existing,
+budget-admitted READ actions**, with once-only fenced claims, atomic terminal
+result recording and explicit UNKNOWN recovery. Ordinary READ completion
+cannot bypass the bridge for `probe:v1:` fingerprints. This is control-plane
+bookkeeping, **not** a process-running authenticated host, cryptographic
+attestation or independent verification. The Git probe runner remains a
+separate unprivileged component. See
+[probe-action bridge](docs/KOTZE-ORIGINAL-PROBE-BRIDGE.md).
+The new test source has not been executed.
+
 ## Local build (no GitHub Actions / hosted runners)
 
 Requirements: C11 compiler, SQLite3 development library, `make`.

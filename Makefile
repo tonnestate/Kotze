@@ -21,17 +21,20 @@ build/kotze-read-host: src/kotze_read_host.c src/kotze_protocol.c src/kotze_regi
 	$(CC) $(CPPFLAGS) $(CFLAGS) src/kotze_read_host.c src/kotze_protocol.c src/kotze_register.c src/kotze_async.c -o $@ $(LDLIBS)
 build/kotze-probe: src/kotze_probe_cli.c src/kotze_probe.c include/kotze_probe.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) src/kotze_probe_cli.c src/kotze_probe.c -o $@
+build/test-probe-bridge: tests/test_probe_bridge.c src/kotze.c src/kotze_probe_bridge.c include/kotze.h include/kotze_probe_bridge.h | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_probe_bridge.c src/kotze.c src/kotze_probe_bridge.c -o $@ $(LDLIBS)
 build/test-probe: tests/test_probe.c src/kotze_probe.c include/kotze_probe.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_probe.c src/kotze_probe.c -o $@
 build/test-protocol: tests/test_protocol.c src/kotze_protocol.c include/kotze_protocol.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_protocol.c src/kotze_protocol.c -o $@ $(LDLIBS)
-check: build/test-core build/test-dispatch build/test-register build/test-async build/test-protocol build/test-probe
+check: build/test-core build/test-dispatch build/test-register build/test-async build/test-protocol build/test-probe build/test-probe-bridge
 	./build/test-core
 	./build/test-dispatch
 	./build/test-register
 	./build/test-async
 	./build/test-protocol
 	./build/test-probe
+	./build/test-probe-bridge
 	python3 -m unittest discover -s tests -p "test_skill_grader.py" -v
 clean:
 	rm -rf build
