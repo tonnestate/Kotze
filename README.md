@@ -15,6 +15,16 @@ freeze a previously claimed action as UNKNOWN after a verified dispatcher crash.
 **No automatic retry, external execution, authenticated verifier or full agent
 runtime is implied.** See [effect dispatch and crash recovery](docs/EFFECT_DISPATCH.md).
 
+## Prioritized Original-KOTZE roadmap
+
+The economic and scientific implementation decisions for the **original coding
+harness** are documented in [Economics, evidence and C11 implementation roadmap](docs/KOTZE-ORIGINAL-ECONOMICS-SCIENCE-C11-ROADMAP.md).
+The next engineering boundary is the trusted local host and independent verifier,
+not a larger multi-agent runtime or unrestricted harness self-optimization.
+Multi-agent collaboration, Gemma-specific jackets, statistical repair memory and
+Harness²-style improvement are complementary *later* options, each subject to
+independent evaluation and measured cost per verified result.
+
 ## Local build (no GitHub Actions / hosted runners)
 
 Requirements: C11 compiler, SQLite3 development library, `make`.
