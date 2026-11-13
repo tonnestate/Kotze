@@ -1,5 +1,7 @@
 # Trusted host / worker namespace boundary (phase 1.7)
 
+> Phase 2.0: candidate launch now mandates a nonroot host worker UID/GID and host-owned worker staging parent (root:worker-group 0710), separate from private host scratch; see [Host Identity Repair](HOST_IDENTITY_REPAIR.md). Offline tests are not a live security attestation.
+
 **Scope:** host-controlled Linux worker execution. This module produces an unverified candidate snapshot; it is neither the external grader nor evidence of PASS. The worker process cannot inherit a host shell, network namespace, host environment, trust ledger, oracle, or C11 state database through the configured bubblewrap mount table.
 
 ## Required layout and controls
