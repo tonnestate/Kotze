@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -75,6 +76,17 @@ class RepairStepTests(unittest.TestCase):
             step.edit({'schema': step.SCHEMA, 'action': 'edit_test',
                        'path': 'calc.py', 'old': 'a - b', 'new': 'a + b',
                        'shell': 'sh -c whoami'}, self.root)
+
+    def test_worker_action_stdin_not_argv(self):
+        source = Path(step.__file__).read_text(encoding='utf-8')
+        # This is a trusted synthetic fixture outside the production sandbox.
+        adapted = source.replace("run(action, Path('/work'))", 'run(action, Path.cwd())')
+        cmd = ['/usr/bin/python3', '-I', '-B', '-c', adapted]
+        self.assertNotIn('a + b', repr(cmd))
+        result = subprocess.run(cmd, cwd=self.root, capture_output=True, text=True,
+                                input=json.dumps(self.request()), timeout=12)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['status'], 'PUBLIC_TESTS_PASS')
 
     def test_error_code_takes_priority_over_test_count(self):
         # 'Ran 1 test' is not sufficient if the test command itself exits nonzero.
@@ -256,7 +268,11 @@ class AgentLoopTests(unittest.TestCase):
         self.assertEqual(hc.digest_tree(kw['source']), kw['expected_source_sha256'])
         stage = kw['publish_parent'] / kw['output_name']
         shutil.copytree(kw['source'], stage)
-        request = json.loads(kw['argv'][-1])
+        self.assertEqual(len(kw['argv']), 5)
+        self.assertNotIn('a + b', repr(kw['argv']))
+        self.assertIsInstance(kw['stdin_data'], bytes)
+        self.assertLessEqual(len(kw['stdin_data']), 16384)
+        request = json.loads(kw['stdin_data'])
         self.assertEqual(request['schema'], step.SCHEMA)
         report = step.run(request, stage)
         hc.enforce_edit_scope(kw['source'], stage, set(), kw['allowed_changed_path'])
