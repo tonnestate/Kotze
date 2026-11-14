@@ -45,6 +45,7 @@ def _trusted_tool_imports() -> None:
 _trusted_tool_imports()
 import gemma_worker as gm
 import host_controller as hc
+import secure_snapshot
 import repair_step
 
 SCHEMA = 'kotze.repair-action.v1'
@@ -311,6 +312,19 @@ def preflight(args: argparse.Namespace) -> None:
     # The source must not overlap with the private contract, receipt or oracle.
     trusted = hc.strict_dir(args.trusted, private=True)
     source = hc.strict_dir(args.source)
+    if args.source != source:
+        raise Rejected('Source must be a canonical absolute directory, without symlinks')
+    # No component of the original baseline path may be replaced by an
+    # untrusted actor while the model is inspecting or the host is copying it.
+    for ancestor in (source, *source.parents):
+        info = ancestor.lstat()
+        if (info.st_uid != 0 or info.st_mode & 0o022
+                or stat.S_ISLNK(info.st_mode)):
+            raise Rejected('Original source path has an untrusted ancestor')
+    try:
+        secure_snapshot.directory_inventory(source, owner_uid=0)
+    except secure_snapshot.SnapshotError as exc:
+        raise Rejected('Original source files are not exclusively host-controlled') from exc
     scratch = hc.strict_stage_root(args.scratch)
     published = hc.strict_dir(args.publish_parent, private=True)
     if (args.manifest.is_symlink()
