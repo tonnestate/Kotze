@@ -224,7 +224,8 @@ def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
                source: Path, expected_source_sha256: str, scratch: Path,
                publish_parent: Path, output_name: str, argv: list[str],
                worker_uid: int, worker_gid: int, timeout: int = 120,
-               capture_report: bool = False) -> dict:
+               capture_report: bool = False,
+               allowed_changed_path: str | None = None) -> dict:
     if os.name != 'posix' or sys.platform != 'linux':
         raise Refused('Linux namespace sandbox required')
     bwrap = trusted_bwrap_path()
@@ -297,6 +298,25 @@ def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
                 raise Refused('Worker telemetry exceeded hard output limit')
             report = stdout.read_bytes().decode('utf-8', 'replace')
         strip_protected(workspace, excluded)
+        if allowed_changed_path is not None:
+            # The model may change ONE host-selected source path, not tests,
+            # fixtures, dependencies or the public test runner. Compare every
+            # other file using the descriptor-anchored tree digest.
+            allowed = Path(allowed_changed_path)
+            if (not allowed_changed_path or allowed.is_absolute()
+                    or any(part in ('', '.', '..', '.git') for part in allowed.parts)
+                    or str(allowed) != allowed_changed_path
+                    or allowed in excluded
+                    or any(parent in excluded for parent in allowed.parents)):
+                raise Refused('Invalid single-file edit scope')
+            others = frozenset(excluded | {allowed})
+            try:
+                before_other = secure_snapshot.tree(source, excluded=others)
+                after_other = secure_snapshot.tree(workspace, excluded=others)
+            except secure_snapshot.SnapshotError as exc:
+                raise Refused('Edit scope snapshot rejected') from exc
+            if before_other != after_other:
+                raise Refused('Worker modified files outside authorized source path')
         candidate_sha = digest_tree(workspace)
         # Cross-device safe: stage in the publication parent, then atomically rename.
         with tempfile.TemporaryDirectory(prefix='.kotze-publish-', dir=publish_parent) as staged:
@@ -331,6 +351,8 @@ def main() -> int:
     p.add_argument('--timeout', type=int, default=120)
     p.add_argument('--capture-report', action='store_true',
                    help='return bounded untrusted worker stdout, never a receipt')
+    p.add_argument('--allowed-changed-path',
+                   help='Optional exact one-file edit scope, enforced before publication')
     p.add_argument('argv', nargs=argparse.REMAINDER)
     a = vars(p.parse_args())
     a['argv'] = a['argv'][1:] if a['argv'][:1] == ['--'] else a['argv']
