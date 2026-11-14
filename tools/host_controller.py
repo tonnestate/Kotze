@@ -202,6 +202,33 @@ def strip_protected(root: Path, paths: set[Path]) -> None:
             raise Refused('Worker shadowed a protected path with a directory')
 
 
+def enforce_edit_scope(source: Path, workspace: Path, excluded: set[Path],
+                       allowed_changed_path: str) -> None:
+    """Only the explicitly selected source path may change in this sandbox step.
+
+    This is an independent host-side check; worker-controlled test output cannot
+    authorize changing fixture or test bytes. Empty directory additions are not
+    represented by the legacy file-tree digest and require later verification.
+    """
+    if type(allowed_changed_path) is not str:
+        raise Refused('Invalid single-file edit scope')
+    allowed = Path(allowed_changed_path)
+    if (not allowed_changed_path or allowed.is_absolute()
+            or any(part in ('', '.', '..', '.git') for part in allowed.parts)
+            or str(allowed) != allowed_changed_path
+            or allowed in excluded
+            or any(parent in excluded for parent in allowed.parents)):
+        raise Refused('Invalid single-file edit scope')
+    others = frozenset(excluded | {allowed})
+    try:
+        before_other = secure_snapshot.tree(source, excluded=others)
+        after_other = secure_snapshot.tree(workspace, excluded=others)
+    except secure_snapshot.SnapshotError as exc:
+        raise Refused('Edit scope snapshot rejected') from exc
+    if before_other != after_other:
+        raise Refused('Worker modified files outside authorized source path')
+
+
 def worker_command(bwrap: str, workspace: Path, argv: list[str]) -> list[str]:
     if not argv or any(not isinstance(s, str) or not s or '\x00' in s for s in argv):
         raise Refused('Worker must have a nonempty argument vector')
@@ -299,24 +326,7 @@ def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
             report = stdout.read_bytes().decode('utf-8', 'replace')
         strip_protected(workspace, excluded)
         if allowed_changed_path is not None:
-            # The model may change ONE host-selected source path, not tests,
-            # fixtures, dependencies or the public test runner. Compare every
-            # other file using the descriptor-anchored tree digest.
-            allowed = Path(allowed_changed_path)
-            if (not allowed_changed_path or allowed.is_absolute()
-                    or any(part in ('', '.', '..', '.git') for part in allowed.parts)
-                    or str(allowed) != allowed_changed_path
-                    or allowed in excluded
-                    or any(parent in excluded for parent in allowed.parents)):
-                raise Refused('Invalid single-file edit scope')
-            others = frozenset(excluded | {allowed})
-            try:
-                before_other = secure_snapshot.tree(source, excluded=others)
-                after_other = secure_snapshot.tree(workspace, excluded=others)
-            except secure_snapshot.SnapshotError as exc:
-                raise Refused('Edit scope snapshot rejected') from exc
-            if before_other != after_other:
-                raise Refused('Worker modified files outside authorized source path')
+            enforce_edit_scope(source, workspace, excluded, allowed_changed_path)
         candidate_sha = digest_tree(workspace)
         # Cross-device safe: stage in the publication parent, then atomically rename.
         with tempfile.TemporaryDirectory(prefix='.kotze-publish-', dir=publish_parent) as staged:
