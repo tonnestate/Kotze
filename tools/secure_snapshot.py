@@ -192,7 +192,8 @@ def tree(source: Path, destination: Path | None = None, *,
             os.close(src_fd)
 
 def directory_inventory(source: Path, *,
-                        excluded: frozenset[Path] = frozenset()) -> frozenset[Path]:
+                        excluded: frozenset[Path] = frozenset(),
+                        owner_uid: int | None = None) -> frozenset[Path]:
     """Descriptor-anchored directory-shape guard.
 
     The legacy content digest deliberately omits directory entries, including
@@ -206,6 +207,8 @@ def directory_inventory(source: Path, *,
         if depth > MAX_DEPTH or len(directories) > MAX_DIRECTORIES:
             raise SnapshotError('Directory inventory exceeded bounded policy')
         start = os.fstat(fd)
+        if owner_uid is not None and (start.st_uid != owner_uid or start.st_mode & 0o022):
+            raise SnapshotError('Source directory not host-owned and readonly')
         names = set(os.listdir(fd))
         if len(names) > MAX_FILES + MAX_DIRECTORIES:
             raise SnapshotError('Directory entry count exceeded bounded policy')
@@ -216,6 +219,9 @@ def directory_inventory(source: Path, *,
             if any(rel == p or p in rel.parents for p in excluded):
                 continue
             before = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            if owner_uid is not None and (before.st_uid != owner_uid
+                                          or before.st_mode & 0o022):
+                raise SnapshotError('Source entry not host-owned and readonly')
             if stat.S_ISDIR(before.st_mode):
                 if len(directories) >= MAX_DIRECTORIES:
                     raise SnapshotError('Too many directories in inventory')
