@@ -1,0 +1,13 @@
+agent_class: LlmAgent
+name: kotze_coder
+model: gemma-4-31b-it-qat-w4a16-ct
+instruction: !include prompts/system.md
+tools:
+  - read_file
+  - edit_file
+  - write_file
+  - run_command
+  - search_similar_code
+  - get_code_neighbors
+  - get_status
+  - submit_patch
