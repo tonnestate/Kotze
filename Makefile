@@ -32,6 +32,7 @@ check: build/test-core build/test-trajectory build/kotze-core
 	python3 -m unittest discover -s tests -p "test_secure_snapshot.py" -v
 	python3 -m unittest discover -s tests -p "test_verifier_service.py" -v
 	python3 -m unittest discover -s tests -p "test_repair_agent.py" -v
+	python3 -m unittest discover -s tests -p "test_navigation.py" -v
 	python3 -m unittest discover -s tests -p "test_integration_units.py" -v
 # Live end-to-end acceptance A-J: root, Linux, Bubblewrap and two dedicated OS
 # accounts required; reports BLOCKED (exit 77) instead of mocking isolation.
