@@ -74,6 +74,11 @@ class IPCContractTests(unittest.TestCase):
                 with self.assertRaisesRegex(v.Refused, 'Unexpected'):
                     v.decode_request(request(**{field: 'VERIFIER'}))
 
+    def test_duplicate_json_fields_refused(self):
+        attack = b'{"schema":"kotze.verifier-ipc.v1","op":"event","op":"verify","work_id":"work-1","task_id":"task-1","arm":"SKILL"}\n'
+        with self.assertRaisesRegex(v.Refused, 'Duplicate JSON'):
+            v.decode_request(attack)
+
     def test_requires_exact_schema_op_and_study_arm(self):
         for field, value in [('schema', 'other'), ('op', 'event'),
                              ('arm', 'SUPERUSER'), ('arm', None)]:
