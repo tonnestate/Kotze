@@ -2,6 +2,11 @@ agent_class: LlmAgent
 name: kotze_coder
 model: gemma-4-31b-it-qat-w4a16-ct
 instruction: !include prompts/system.md
+generate_content_config:
+  max_output_tokens: 8192
+  thinking_config:
+    include_thoughts: false
+    thinking_budget: 0
 tools:
   - read_file
   - edit_file
@@ -9,5 +14,6 @@ tools:
   - run_command
   - search_similar_code
   - get_code_neighbors
+  - get_code_subgraph
   - get_status
   - submit_patch
