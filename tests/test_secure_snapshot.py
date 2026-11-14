@@ -162,6 +162,19 @@ class SecureSnapshotTests(unittest.TestCase):
             self.source, excluded=frozenset({Path('private')}))
         self.assertNotIn(Path('private'), scoped)
 
+    def test_readonly_source_inventory_checks_every_inode(self):
+        self.assertIn(Path('dir'), ss.directory_inventory(
+            self.source, owner_uid=os.geteuid()))
+        file = self.source / 'src.py'
+        file.chmod(0o664)
+        with self.assertRaisesRegex(ss.SnapshotError, 'not host-owned'):
+            ss.directory_inventory(self.source, owner_uid=os.geteuid())
+
+    def test_readonly_source_inventory_checks_parent_subdirectories(self):
+        (self.source / 'dir').chmod(0o775)
+        with self.assertRaisesRegex(ss.SnapshotError, 'not host-owned'):
+            ss.directory_inventory(self.source, owner_uid=os.geteuid())
+
     def test_directory_inventory_rejects_symlink(self):
         (self.source / 'bad_link').symlink_to('/etc')
         with self.assertRaisesRegex(ss.SnapshotError, 'Symlink'):
