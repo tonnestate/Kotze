@@ -129,10 +129,13 @@ def run(action: dict, root: Path) -> dict:
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
+    if len(sys.argv) != 1:
         return 2
     try:
-        action = json.loads(sys.argv[1])
+        payload = sys.stdin.buffer.read(16385)
+        if not payload or len(payload) > 16384:
+            raise Rejected('bounded stdin action payload required')
+        action = json.loads(payload.decode('utf-8', 'strict'))
         result = run(action, Path('/work'))
     except (Rejected, OSError, ValueError, TypeError, KeyError) as exc:
         result = {'schema': SCHEMA, 'status': 'EDIT_REJECTED',
