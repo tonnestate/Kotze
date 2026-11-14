@@ -52,3 +52,7 @@ Full interfaces, state transitions, recovery boundaries, donor decisions, and ac
 ## Design rule
 
 **Model + KOTZE Harness = autonomous coding agent**. Worker suggestions are not authoritative state. An immutable request and accepted domain contract must survive model/context changes. Every admitted action must be scoped, durable, budgeted, replay-safe, and independently verifiable before work is considered completed.
+
+## Phase 2.4: OS-authenticated verifier admission
+
+The draft [verifier IPC service](docs/VERIFIER_IPC.md) uses Linux SO_PEERCRED on a private Unix socket to admit only an explicitly configured verifier UID/GID. The worker cannot supply files, an oracle, receipt content, verifier actor, C11 event ID or decision. The trusted service revalidates the host-private receipt and delegates to the existing C11 bridge. Local contract tests and a synthetic real-UID socket denial passed; full native C11 end-to-end testing and live Bubblewrap acceptance remain open. This is not deployed or merged.
