@@ -283,12 +283,15 @@ def preflight(args: argparse.Namespace) -> None:
     if (args.db.is_symlink() or not args.db.is_file()
             or not hc.within(args.db.resolve(strict=True), trusted)):
         raise Rejected('C11 database must be inside trusted root')
-    if (args.core_bin.is_symlink() or not args.core_bin.is_file()
-            or not os.access(args.core_bin, os.X_OK)):
+    if (not args.core_bin.is_absolute() or args.core_bin.is_symlink()
+            or not args.core_bin.is_file() or not os.access(args.core_bin, os.X_OK)):
         raise Rejected('Trusted native reducer binary unavailable')
-    core_stat = args.core_bin.stat()
-    if core_stat.st_uid != os.geteuid() or core_stat.st_mode & 0o022:
-        raise Rejected('Native reducer executable is not host-owned and readonly')
+    current = Path('/')
+    for component in args.core_bin.parts[1:]:
+        current = current / component
+        info = current.lstat()
+        if info.st_uid != 0 or info.st_mode & 0o022 or stat.S_ISLNK(info.st_mode):
+            raise Rejected('Native C11 executable or ancestor is untrusted')
     for left, right in ((trusted, source), (trusted, scratch),
                         (trusted, published), (source, scratch),
                         (source, published), (scratch, published)):
@@ -303,7 +306,9 @@ def preflight(args: argparse.Namespace) -> None:
 
 
 def run(args: argparse.Namespace) -> dict:
-    if (not 1 <= args.max_steps <= MAX_STEPS or args.model_timeout < 1
+    if (args.arm not in ('BASE', 'SKILL') or not 1 <= args.max_steps <= MAX_STEPS
+            or not 1 <= args.model_timeout <= 180
+            or not 1 <= args.worker_timeout <= 300
             or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,70}', args.event_prefix)):
         raise Rejected('Invalid loop policy')
     preflight(args)
