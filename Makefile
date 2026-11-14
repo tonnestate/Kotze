@@ -3,7 +3,7 @@ CFLAGS ?= -std=c11 -O2 -Wall -Wextra -Werror -pedantic
 CPPFLAGS ?= -Iinclude -D_POSIX_C_SOURCE=200809L
 LDLIBS ?= -lsqlite3
 
-.PHONY: all check clean bench-trajectory acceptance
+.PHONY: all check clean bench-trajectory acceptance check-submission submission notebook
 all: build/kotze-core
 build:
 	mkdir -p build
@@ -37,5 +37,11 @@ check: build/test-core build/test-trajectory build/kotze-core
 # accounts required; reports BLOCKED (exit 77) instead of mocking isolation.
 acceptance: build/kotze-core
 	python3 tests/e2e/acceptance.py --provision-accounts
+check-submission:
+	python3 -m unittest discover -s tests -p 'test_submission_package.py' -v
+submission:
+	python3 tools/build_submission.py
+notebook: submission
+	python3 tools/build_kaggle_notebook.py
 clean:
 	rm -rf build
