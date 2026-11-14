@@ -9,6 +9,7 @@ a PASS, never a receipt or a C11 verifier event.
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -219,7 +220,7 @@ def validate_work_identity(db: Path, work_id: str, task: dict) -> int:
     if not isinstance(work_id, str) or not work_id or len(work_id) > 128:
         raise Rejected('Invalid C11 work identity')
     try:
-        with sqlite3.connect(db.as_uri() + '?mode=ro', uri=True, timeout=5) as conn:
+        with closing(sqlite3.connect(db.as_uri() + '?mode=ro', uri=True, timeout=5)) as conn:
             row = conn.execute(
                 'SELECT state,mode,base_sha,oracle_hash,revision FROM works WHERE id=?',
                 (work_id,)).fetchone()
@@ -292,7 +293,7 @@ def seal_candidate(args: argparse.Namespace, task: dict, expected_revision: int,
     if result.returncode or 'OK: transaction committed' not in result.stdout:
         raise Rejected('C11 rejected candidate handoff to verifier')
     try:
-        with sqlite3.connect(args.db.as_uri() + '?mode=ro', uri=True, timeout=5) as conn:
+        with closing(sqlite3.connect(args.db.as_uri() + '?mode=ro', uri=True, timeout=5)) as conn:
             row = conn.execute(
                 'SELECT state,revision,candidate_sha,oracle_hash FROM works WHERE id=?',
                 (args.work_id,)).fetchone()
@@ -318,6 +319,10 @@ def preflight(args: argparse.Namespace) -> None:
     if (args.db.is_symlink() or not args.db.is_file()
             or not hc.within(args.db.resolve(strict=True), trusted)):
         raise Rejected('C11 database must be inside trusted root')
+    for protected_file in (args.db, args.manifest):
+        file_stat = protected_file.stat()
+        if file_stat.st_uid != 0 or file_stat.st_mode & 0o022:
+            raise Rejected('C11 work state or manifest has unsafe ownership')
     if (not args.core_bin.is_absolute() or args.core_bin.is_symlink()
             or not args.core_bin.is_file() or not os.access(args.core_bin, os.X_OK)):
         raise Rejected('Trusted native reducer binary unavailable')
