@@ -135,6 +135,12 @@ class HostEditScopeTests(unittest.TestCase):
         with self.assertRaisesRegex(hc.Refused, 'vanished'):
             hc.enforce_edit_scope(self.source, self.worker, set(), 'calc.py')
 
+    def test_unexpected_empty_directory_is_rejected(self):
+        (self.worker / 'calc.py').write_text('after\n')
+        (self.worker / 'unapproved-empty-directory').mkdir()
+        with self.assertRaisesRegex(hc.Refused, 'changed directories'):
+            hc.enforce_edit_scope(self.source, self.worker, set(), 'calc.py')
+
     def test_nested_test_helper_cannot_be_scoped(self):
         for root in (self.source, self.worker):
             (root / 'pkg').mkdir()
