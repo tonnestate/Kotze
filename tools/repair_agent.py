@@ -312,21 +312,24 @@ def preflight(args: argparse.Namespace) -> None:
     # The source must not overlap with the private contract, receipt or oracle.
     trusted = hc.strict_dir(args.trusted, private=True)
     source = hc.strict_dir(args.source)
+    scratch = hc.strict_stage_root(args.scratch)
+    published = hc.strict_dir(args.publish_parent, private=True)
+    for supplied, resolved in ((args.trusted, trusted), (args.source, source),
+                               (args.scratch, scratch), (args.publish_parent, published)):
+        if supplied != resolved:
+            raise Rejected('All host paths must be absolute, canonical and symlink-free')
+        for ancestor in (resolved, *resolved.parents):
+            info = ancestor.lstat()
+            if (info.st_uid != 0 or info.st_mode & 0o022
+                    or stat.S_ISLNK(info.st_mode)):
+                raise Rejected('Host-controlled path has an unsafe writable ancestor')
     if args.source != source:
         raise Rejected('Source must be a canonical absolute directory, without symlinks')
-    # No component of the original baseline path may be replaced by an
-    # untrusted actor while the model is inspecting or the host is copying it.
-    for ancestor in (source, *source.parents):
-        info = ancestor.lstat()
-        if (info.st_uid != 0 or info.st_mode & 0o022
-                or stat.S_ISLNK(info.st_mode)):
-            raise Rejected('Original source path has an untrusted ancestor')
+    # Every source inode, not just the directory root, must be host-owned.
     try:
         secure_snapshot.directory_inventory(source, owner_uid=0)
     except secure_snapshot.SnapshotError as exc:
         raise Rejected('Original source files are not exclusively host-controlled') from exc
-    scratch = hc.strict_stage_root(args.scratch)
-    published = hc.strict_dir(args.publish_parent, private=True)
     if (args.manifest.is_symlink()
             or not hc.within(args.manifest.resolve(strict=True), trusted)):
         raise Rejected('Study manifest is not host-private')
