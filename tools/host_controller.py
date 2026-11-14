@@ -255,6 +255,17 @@ def enforce_edit_scope(source: Path, workspace: Path, excluded: set[Path],
         raise Refused('Edit scope snapshot rejected') from exc
     if before_other != after_other:
         raise Refused('Worker modified files outside authorized source path')
+    # File-tree SHA deliberately omits empty directories: compare the actual
+    # directory shape too, without silently changing historical hash values.
+    try:
+        source_dirs = secure_snapshot.directory_inventory(source,
+                                                           excluded=frozenset(excluded))
+        worker_dirs = secure_snapshot.directory_inventory(workspace,
+                                                           excluded=frozenset(excluded))
+    except secure_snapshot.SnapshotError as exc:
+        raise Refused('Edit scope directory inventory rejected') from exc
+    if source_dirs != worker_dirs:
+        raise Refused('Worker changed directories outside authorized edit scope')
     try:
         before_full = secure_snapshot.tree(source, excluded=frozenset(excluded))
         after_full = secure_snapshot.tree(workspace, excluded=frozenset(excluded))
