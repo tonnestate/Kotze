@@ -191,6 +191,7 @@ def run(args: argparse.Namespace) -> dict:
     current = args.source
     initial_sha = hc.digest_tree(current)
     seen = set()
+    inspected = set()
     observations = ['No source file inspected yet. Select an inspect action.']
     had_edit = False
     last_test_pass = False
@@ -214,6 +215,7 @@ def run(args: argparse.Namespace) -> dict:
         seen.add(fingerprint)
         if action['action'] == 'inspect':
             source = inspect(current, action['path'], hidden)
+            inspected.add(action['path'])
             observations.append('INSPECT ' + action['path'] + ' (UNTRUSTED SOURCE):\n' + source)
             trail.append({'step': step, 'action': 'inspect', 'path': action['path'],
                           'snapshot_sha256': source_sha})
@@ -228,6 +230,8 @@ def run(args: argparse.Namespace) -> dict:
                     'initial_tree_sha256': initial_sha, 'candidate_tree_sha256': source_sha,
                     'candidate': str(current), 'verified': False, 'steps': trail}
         _path(current, action['path'], hidden)
+        if action['path'] not in inspected:
+            raise Rejected('An exact source inspection is required before editing')
         # The worker executes this exact host-owned source via python -c. The
         # model JSON is data only; it cannot supply a shell/tool command.
         sandbox_action = dict(action)
@@ -238,10 +242,11 @@ def run(args: argparse.Namespace) -> dict:
             arm=args.arm, source=current, expected_source_sha256=source_sha,
             scratch=args.scratch, publish_parent=args.publish_parent,
             output_name=output_name,
-            argv=['/usr/bin/python3', '-B', '-c', script,
+            argv=['/usr/bin/python3', '-I', '-B', '-c', script,
                   json.dumps(sandbox_action, ensure_ascii=True, separators=(',', ':'))],
             worker_uid=args.worker_uid, worker_gid=args.worker_gid,
-            timeout=args.worker_timeout, capture_report=True)
+            timeout=args.worker_timeout, capture_report=True,
+            allowed_changed_path=action['path'])
         try:
             report = json.loads(stage['worker_report_untrusted'])
         except (KeyError, ValueError, TypeError) as exc:
@@ -255,6 +260,7 @@ def run(args: argparse.Namespace) -> dict:
                 or not isinstance(report.get('diagnostic'), str)):
             raise Rejected('Unexpected untrusted worker telemetry')
         current = Path(stage['output'])
+        inspected.clear()  # A changed source requires a fresh model inspection.
         if hc.digest_tree(current) != stage['candidate_tree_sha256']:
             raise Rejected('Published candidate digest did not match host record')
         changed = source_sha != stage['candidate_tree_sha256']
