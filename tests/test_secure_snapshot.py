@@ -148,6 +148,25 @@ class SecureSnapshotTests(unittest.TestCase):
         with self.assertRaisesRegex(ss.SnapshotError, 'nesting'):
             ss.tree(self.source)
 
+    def test_directory_inventory_detects_new_empty_folder_without_hash_change(self):
+        baseline_hash = ss.tree(self.source)
+        baseline_dirs = ss.directory_inventory(self.source)
+        (self.source / 'hidden_empty').mkdir()
+        self.assertEqual(ss.tree(self.source), baseline_hash)
+        self.assertNotEqual(ss.directory_inventory(self.source), baseline_dirs)
+        self.assertIn(Path('hidden_empty'), ss.directory_inventory(self.source))
+
+    def test_directory_inventory_respects_excluded_protected_folder(self):
+        (self.source / 'private').mkdir()
+        scoped = ss.directory_inventory(
+            self.source, excluded=frozenset({Path('private')}))
+        self.assertNotIn(Path('private'), scoped)
+
+    def test_directory_inventory_rejects_symlink(self):
+        (self.source / 'bad_link').symlink_to('/etc')
+        with self.assertRaisesRegex(ss.SnapshotError, 'Symlink'):
+            ss.directory_inventory(self.source)
+
     def test_refuse_relative_path(self):
         with self.assertRaisesRegex(ss.SnapshotError, 'absolute'):
             ss.tree(Path('relative'))
