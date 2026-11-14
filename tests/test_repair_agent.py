@@ -290,7 +290,7 @@ class AgentLoopTests(unittest.TestCase):
         self.addCleanup(self.finish_patch.stop)
         self.seal_patch = patch.object(agent, 'seal_candidate', return_value={
             'event_id': 'synthetic-seal', 'state': 'VERIFYING', 'revision': 4})
-        self.seal_patch.start()
+        self.seal_mock = self.seal_patch.start()
         self.addCleanup(self.seal_patch.stop)
 
     @staticmethod
@@ -405,7 +405,7 @@ class AgentLoopTests(unittest.TestCase):
                 with patch.object(agent.hc, 'run_worker', side_effect=forged_stage):
                     with self.assertRaisesRegex(agent.Rejected, 'host-observed source bytes'):
                         agent.run(self.args)
-        self.seal_patch.assert_not_called()
+        self.seal_mock.assert_not_called()
 
     def test_model_cannot_submit_without_patch(self):
         with patch.object(agent.hc, 'protected_paths',
