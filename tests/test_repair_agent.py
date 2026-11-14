@@ -259,6 +259,7 @@ class AgentLoopTests(unittest.TestCase):
             '    def test_add(self): self.assertEqual(add(2, 3), 5)\n')
         self.manifest = self.trusted / 'study.json'
         self.manifest.write_text('synthetic manifest; host policy is mocked in this test')
+        self.study_task = {'source_tree_sha256': hc.digest_tree(self.source)}
         self.args = Namespace(
             source=self.source, trusted=self.trusted, manifest=self.manifest,
             scratch=self.scratch, publish_parent=self.published,
@@ -319,7 +320,7 @@ class AgentLoopTests(unittest.TestCase):
             transcripts.append(text)
             return {'proposal': actions[index - 1]}
         with patch.object(agent.hc, 'protected_paths',
-                          return_value=({}, {}, 'synthetic', set())):
+                          return_value=({}, self.study_task, 'synthetic', set())):
             with patch.object(agent, '_model', side_effect=model):
                 with patch.object(agent.hc, 'run_worker', side_effect=self.fake_stage):
                     result = agent.run(self.args)
@@ -332,9 +333,36 @@ class AgentLoopTests(unittest.TestCase):
         self.assertEqual((Path(result['candidate']) / 'calc.py').read_text(),
                          'def add(a, b):\n    return a + b\n')
 
+    def test_model_never_called_without_host_pinned_original_tree(self):
+        with patch.object(agent.hc, 'protected_paths',
+                          return_value=({}, {'source_tree_sha256': '0' * 64},
+                                        'synthetic', set())):
+            with patch.object(agent, '_model') as model:
+                with self.assertRaisesRegex(agent.Rejected, 'host-pinned baseline'):
+                    agent.run(self.args)
+                model.assert_not_called()
+
+    def test_skill_study_arms_cannot_be_mixed(self):
+        self.args.skill_file = self.trusted / 'skill.txt'
+        self.args.skill_file.write_text('advisory only')
+        with patch.object(agent.hc, 'protected_paths',
+                          return_value=({}, self.study_task, 'synthetic', set())):
+            with patch.object(agent, '_model') as model:
+                with self.assertRaisesRegex(agent.Rejected, 'BASE arm'):
+                    agent.run(self.args)
+                model.assert_not_called()
+        self.args.arm = 'SKILL'
+        self.args.skill_file = None
+        with patch.object(agent.hc, 'protected_paths',
+                          return_value=({}, self.study_task, 'synthetic', set())):
+            with patch.object(agent, '_model') as model:
+                with self.assertRaisesRegex(agent.Rejected, 'SKILL arm'):
+                    agent.run(self.args)
+                model.assert_not_called()
+
     def test_model_cannot_submit_without_patch(self):
         with patch.object(agent.hc, 'protected_paths',
-                          return_value=({}, {}, 'synthetic', set())):
+                          return_value=({}, self.study_task, 'synthetic', set())):
             with patch.object(agent, '_model',
                               return_value={'proposal': self.message('submit')}):
                 with patch.object(agent.hc, 'run_worker') as run:
@@ -348,7 +376,7 @@ class AgentLoopTests(unittest.TestCase):
                    self.message('edit_test', path='sitecustomize.py',
                                 old='value = 0', new='value = 1')]
         with patch.object(agent.hc, 'protected_paths',
-                          return_value=({}, {}, 'synthetic', set())):
+                          return_value=({}, self.study_task, 'synthetic', set())):
             with patch.object(agent, '_model',
                               side_effect=lambda _args, step, _prompt: {'proposal': actions[step - 1]}):
                 with patch.object(agent.hc, 'run_worker') as run:
@@ -360,7 +388,7 @@ class AgentLoopTests(unittest.TestCase):
         action = self.message('edit_test', path='calc.py',
                               old='a - b', new='a + b')
         with patch.object(agent.hc, 'protected_paths',
-                          return_value=({}, {}, 'synthetic', set())):
+                          return_value=({}, self.study_task, 'synthetic', set())):
             with patch.object(agent, '_model', return_value={'proposal': action}):
                 with patch.object(agent.hc, 'run_worker') as run:
                     with self.assertRaisesRegex(agent.Rejected, 'inspection'):
