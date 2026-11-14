@@ -4,6 +4,8 @@
 
 **Manuscript v1.0 — 12 November 2026**
 
+**Implementation companion (14 November 2026):** [KOTZE Harness 4.2 — Implementation Status, Threat Model and Preregisterable Evaluation Protocol](KOTZE-Harness-4.2-Implementation-and-Evaluation-Protocol.md). This earlier manuscript is a conceptual research design; consult the companion for code-to-claim traceability and the current limits of empirical evidence. The companion does not imply independent security certification or measured repair-rate improvement.
+
 **Status:** Scientific design study and falsifiable research proposal. **No implemented, benchmarked, independently validated, or production-ready KOTZE Harness is claimed.** Actual authorship, affiliations, disclosures, and publication venue must be declared before submission. This manuscript is not a systematic literature review or a completed empirical experiment.
 
 ## Abstract
