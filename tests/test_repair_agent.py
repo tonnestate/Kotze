@@ -152,6 +152,10 @@ class AgentLoopTests(unittest.TestCase):
             max_steps=6, model_timeout=60, worker_timeout=120, max_tokens=1536,
             provider='ollama', model='gemma4:e4b', skill_file=None,
             allow_remote=False, allow_domain_upload=False)
+        # Pure synthetic fixture: no privileged host, model or Bubblewrap.
+        self.preflight_patch = patch.object(agent, 'preflight', return_value=None)
+        self.preflight_patch.start()
+        self.addCleanup(self.preflight_patch.stop)
 
     @staticmethod
     def message(op, **data):
@@ -214,6 +218,15 @@ class AgentLoopTests(unittest.TestCase):
                     with self.assertRaisesRegex(agent.Rejected, 'inspection'):
                         agent.run(self.args)
                     run.assert_not_called()
+
+    def test_runtime_preflight_happens_before_model_dispatch(self):
+        self.preflight_patch.stop()
+        with patch.object(agent, 'preflight', side_effect=agent.Rejected('isolation missing')):
+            with patch.object(agent, '_model') as model:
+                with self.assertRaisesRegex(agent.Rejected, 'isolation missing'):
+                    agent.run(self.args)
+                model.assert_not_called()
+        self.preflight_patch.start()
 
     def test_hidden_path_excluded_from_inspection(self):
         with self.assertRaisesRegex(agent.Rejected, 'allowed visible'):
