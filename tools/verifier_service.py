@@ -44,7 +44,7 @@ class Config:
     core: Path
     manifest: Path
     receipts: Path
-    candidate: Path
+    candidates_root: Path
     oracle: Path
     verifier_uid: int
     verifier_gid: int
@@ -117,10 +117,13 @@ def preflight(c: Config) -> None:
     _path_components_secure(c.core)
     if not c.core.is_file() or not os.access(c.core, os.X_OK):
         raise Refused('Trusted C11 reducer must be an executable root-owned file')
-    _path_components_secure(c.candidate)
-    if (not c.candidate.is_dir() or c.candidate == c.trusted_root
-            or c.trusted_root in c.candidate.parents):
-        raise Refused('Published candidate directory invalid')
+    _path_components_secure(c.candidates_root)
+    root = c.candidates_root.stat()
+    if (not stat.S_ISDIR(root.st_mode) or stat.S_IMODE(root.st_mode) & 0o077
+            or c.candidates_root == c.trusted_root
+            or c.trusted_root in c.candidates_root.parents
+            or c.candidates_root in c.trusted_root.parents):
+        raise Refused('Candidate publication root must be private and outside the trusted root')
 
 
 def peer_identity(conn: socket.socket) -> tuple[int, int, int]:
@@ -194,13 +197,34 @@ def _event_id(work_id: str, task_id: str, arm: str, receipt: dict) -> str:
     return 'verify-' + hashlib.sha256(identity).hexdigest()[:48]
 
 
+SEALED_NAME = re.compile(r'^[0-9a-f]{64}$', re.ASCII)
+
+
+def candidate_path(c: Config, work_id: str) -> Path:
+    """Resolve the sealed candidate from authoritative C11 state, not from IPC.
+
+    The trusted repair host publishes every handed-off candidate as
+    ``<candidates_root>/sha256-<tree digest>``; the bridge re-hashes it anyway.
+    """
+    import verification_bridge as bridge
+    state = bridge.snapshot(c.db, work_id)
+    sha = state.get('candidate_sha')
+    if state.get('state') != 'VERIFYING' or type(sha) is not str or not SEALED_NAME.fullmatch(sha):
+        raise Refused('Work is not awaiting verification of a sealed candidate')
+    path = c.candidates_root / ('sha256-' + sha)
+    _path_components_secure(path)
+    if not path.is_dir():
+        raise Refused('Sealed candidate publication absent')
+    return path
+
+
 def admit(c: Config, work_id: str, task_id: str, arm: str) -> dict:
     """All paths and the C11 verifier actor are selected by the trusted service."""
     import verification_bridge as bridge
     receipt, _, _ = bridge.verified_receipt(c.manifest, c.receipts, task_id, arm)
     return bridge.bridge(
         db=c.db, core=c.core, manifest=c.manifest, receipts=c.receipts,
-        candidate=c.candidate, oracle=c.oracle, work_id=work_id,
+        candidate=candidate_path(c, work_id), oracle=c.oracle, work_id=work_id,
         task_id=task_id, arm=arm, event_id=_event_id(work_id, task_id, arm, receipt))
 
 
@@ -265,7 +289,7 @@ def serve(c: Config) -> None:
 def main() -> int:
     p = argparse.ArgumentParser(description='KOTZE trusted peercred verifier admission service')
     for name in ('socket_path', 'trusted_root', 'db', 'core', 'manifest',
-                 'receipts', 'candidate', 'oracle'):
+                 'receipts', 'candidates_root', 'oracle'):
         p.add_argument('--' + name.replace('_', '-'), type=Path, required=True)
     for name in ('verifier_uid', 'verifier_gid', 'worker_uid'):
         p.add_argument('--' + name.replace('_', '-'), type=int, required=True)

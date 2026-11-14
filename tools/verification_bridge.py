@@ -14,6 +14,26 @@ import stat
 import subprocess
 import sys
 
+def _trusted_tool_path(names: tuple[str, ...]) -> None:
+    """Under ``python3 -I`` the script directory is not importable. Add it only
+    after every module this trusted-host entry point loads is root-owned, not
+    group/world-writable and reached through a symlink-free root-owned path."""
+    if sys.flags.isolated != 1:
+        return
+    import stat as _stat
+    base = Path(__file__).absolute().parent
+    for name in names:
+        current = Path('/')
+        for part in (base / name).parts[1:]:
+            current = current / part
+            info = current.lstat()
+            if info.st_uid != 0 or info.st_mode & 0o022 or _stat.S_ISLNK(info.st_mode):
+                raise SystemExit('TRUSTED_TOOL_REFUSED: untrusted host tools installation')
+    if str(base) not in sys.path:
+        sys.path.insert(0, str(base))
+
+
+_trusted_tool_path(('verification_bridge.py', 'skill_grader.py', 'receipt_contract.py', 'confidential_grader.py', 'host_controller.py', 'secure_snapshot.py'))
 from skill_grader import (ARMS, ContractError, RECEIPT_SCHEMA, STATES, canonical,
                           load_study, sha, task_of, tree_digest, under)
 from receipt_contract import validate_confidential_receipt
