@@ -118,7 +118,8 @@ def preflight(c: Config) -> None:
     if not c.core.is_file() or not os.access(c.core, os.X_OK):
         raise Refused('Trusted C11 reducer must be an executable root-owned file')
     _path_components_secure(c.candidate)
-    if not c.candidate.is_dir() or c.trusted_root in c.candidate.parents:
+    if (not c.candidate.is_dir() or c.candidate == c.trusted_root
+            or c.trusted_root in c.candidate.parents):
         raise Refused('Published candidate directory invalid')
 
 
@@ -141,11 +142,20 @@ def authorize(conn: socket.socket, c: Config) -> None:
         raise Refused('Unix peer is not the approved verifier OS identity')
 
 
+def _unique_pairs(pairs):
+    fields = {}
+    for key, value in pairs:
+        if key in fields:
+            raise Refused('Duplicate JSON field refused')
+        fields[key] = value
+    return fields
+
+
 def decode_request(raw: bytes) -> tuple[str, str, str]:
     if not raw.endswith(b'\n') or not 1 <= len(raw) <= MAX_MESSAGE:
         raise Refused('Missing or oversized request frame')
     try:
-        msg = json.loads(raw[:-1].decode('utf-8', 'strict'))
+        msg = json.loads(raw[:-1].decode('utf-8', 'strict'), object_pairs_hook=_unique_pairs)
     except (UnicodeError, ValueError) as exc:
         raise Refused('Invalid request JSON') from exc
     if not isinstance(msg, dict) or set(msg) != {'schema', 'op', 'work_id', 'task_id', 'arm'}:
