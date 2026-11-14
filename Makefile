@@ -3,7 +3,7 @@ CFLAGS ?= -std=c11 -O2 -Wall -Wextra -Werror -pedantic
 CPPFLAGS ?= -Iinclude -D_POSIX_C_SOURCE=200809L
 LDLIBS ?= -lsqlite3
 
-.PHONY: all check clean bench-trajectory
+.PHONY: all check clean bench-trajectory acceptance
 all: build/kotze-core
 build:
 	mkdir -p build
@@ -31,5 +31,11 @@ check: build/test-core build/test-trajectory build/kotze-core
 	python3 -m unittest discover -s tests -p "test_worker_os_boundary.py" -v
 	python3 -m unittest discover -s tests -p "test_secure_snapshot.py" -v
 	python3 -m unittest discover -s tests -p "test_verifier_service.py" -v
+	python3 -m unittest discover -s tests -p "test_repair_agent.py" -v
+	python3 -m unittest discover -s tests -p "test_integration_units.py" -v
+# Live end-to-end acceptance A-J: root, Linux, Bubblewrap and two dedicated OS
+# accounts required; reports BLOCKED (exit 77) instead of mocking isolation.
+acceptance: build/kotze-core
+	python3 tests/e2e/acceptance.py --provision-accounts
 clean:
 	rm -rf build

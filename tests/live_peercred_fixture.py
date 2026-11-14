@@ -54,8 +54,8 @@ def run(verifier_uid, verifier_gid, worker_uid):
             file.write_text('synthetic fixture')
             file.chmod(0o600)
         (trusted / 'oracle').mkdir(mode=0o700)
-        candidate = root / 'candidate'
-        candidate.mkdir(mode=0o500)
+        candidate = root / 'published'
+        candidate.mkdir(mode=0o700)
         socket_parent = root / 'ipc'
         socket_parent.mkdir(mode=0o710)
         os.chown(socket_parent, 0, verifier_gid)
@@ -65,7 +65,7 @@ def run(verifier_uid, verifier_gid, worker_uid):
                    '--db', str(trusted / 'db.sqlite'), '--core', '/usr/bin/true',
                    '--manifest', str(trusted / 'study.json'),
                    '--receipts', str(trusted / 'receipts.jsonl'),
-                   '--candidate', str(candidate), '--oracle', str(trusted / 'oracle'),
+                   '--candidates-root', str(candidate), '--oracle', str(trusted / 'oracle'),
                    '--verifier-uid', str(verifier_uid), '--verifier-gid', str(verifier_gid),
                    '--worker-uid', str(worker_uid)]
         daemon = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

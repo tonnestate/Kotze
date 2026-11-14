@@ -22,6 +22,26 @@ import sys
 import tempfile
 import time
 
+def _trusted_tool_path(names: tuple[str, ...]) -> None:
+    """Under ``python3 -I`` the script directory is not importable. Add it only
+    after every module this trusted-host entry point loads is root-owned, not
+    group/world-writable and reached through a symlink-free root-owned path."""
+    if sys.flags.isolated != 1:
+        return
+    import stat as _stat
+    base = Path(__file__).absolute().parent
+    for name in names:
+        current = Path('/')
+        for part in (base / name).parts[1:]:
+            current = current / part
+            info = current.lstat()
+            if info.st_uid != 0 or info.st_mode & 0o022 or _stat.S_ISLNK(info.st_mode):
+                raise SystemExit('TRUSTED_TOOL_REFUSED: untrusted host tools installation')
+    if str(base) not in sys.path:
+        sys.path.insert(0, str(base))
+
+
+_trusted_tool_path(('confidential_grader.py', 'host_controller.py', 'secure_snapshot.py', 'skill_grader.py'))
 import host_controller as hc
 import skill_grader as sg
 
@@ -154,9 +174,35 @@ def execute_one(*, bwrap: str, candidate: Path, scratch: Path, argv: list[str],
             return 'INCONCLUSIVE', None
 
 
-def grade(*, trusted: Path, manifest: Path, oracle: Path, candidate: Path,
-          scratch: Path, receipts: Path, task_id: str, arm: str,
-          candidate_tree_sha256: str, worker_uid: int, worker_gid: int) -> dict:
+def _run_cases(*, bwrap: str, candidate: Path, scratch: Path, task: dict,
+               cases: list[tuple[str, bytes, bytes]], protected: set[Path],
+               worker_uid: int, worker_gid: int) -> tuple[str, str, int | None, int, float]:
+    argv = task['runner']
+    if not isinstance(argv, list) or not argv:
+        raise sg.ContractError('Missing host-registered runner')
+    hc.worker_command(bwrap, candidate, argv)
+    timeout = task.get('timeout_seconds', 60)
+    start = time.monotonic()
+    state, reason, exit_code, passed = 'PASS', 'TRUSTED_RUNNER_EXIT', 0, 0
+    for _, input_data, expected in cases:
+        remaining = timeout - (time.monotonic() - start)
+        if remaining <= 0:
+            state, reason, exit_code = 'INCONCLUSIVE', 'HOST_TEST_TIMEOUT', None
+            break
+        state, exit_code = execute_one(bwrap=bwrap, candidate=candidate, scratch=scratch,
+                                       argv=argv, input_data=input_data, timeout=remaining,
+                                       expected=expected, protected=protected,
+                                       worker_uid=worker_uid, worker_gid=worker_gid)
+        if state != 'PASS':
+            reason = 'TRUSTED_RUNNER_EXIT' if state == 'FAIL' else 'HOST_TEST_INCONCLUSIVE'
+            break
+        passed += 1
+    return state, reason, exit_code, passed, time.monotonic() - start
+
+
+def _admit(*, trusted: Path, manifest: Path, oracle: Path, candidate: Path,
+           scratch: Path, receipts: Path, task_id: str, arm: str,
+           worker_uid: int, worker_gid: int):
     if sys.platform != 'linux':
         raise sg.ContractError('Linux isolation required')
     try:
@@ -177,33 +223,54 @@ def grade(*, trusted: Path, manifest: Path, oracle: Path, candidate: Path,
     oracle_hash = sealed_digest(oracle)
     if oracle_hash != task['oracle_sha256']:
         raise sg.ContractError('Frozen host oracle digest mismatch')
+    return bwrap, study, digest, task, protected, oracle, candidate, scratch, receipts, oracle_hash
+
+
+def reproduce_baseline(*, trusted: Path, manifest: Path, oracle: Path, source: Path,
+                       scratch: Path, task_id: str, worker_uid: int, worker_gid: int) -> dict:
+    """Host-only FAIL_TO_PASS precondition: the pinned baseline must FAIL the oracle.
+
+    Writes NO receipt (the single per task-arm grade stays reserved for the
+    sealed candidate) and its result is never shown to the model or worker; only
+    the host records the digest as C11 BUG_REPRODUCED evidence. A baseline that
+    already passes makes the task invalid and is refused by the caller.
+    """
+    bwrap, study, digest, task, protected, oracle, source, scratch, _, oracle_hash = _admit(
+        trusted=trusted, manifest=manifest, oracle=oracle, candidate=source,
+        scratch=scratch, receipts=trusted / '.unused-reproduction-ledger',
+        task_id=task_id, arm='BASE', worker_uid=worker_uid, worker_gid=worker_gid)
+    source_hash = sealed_digest(source)
+    if source_hash != task.get('source_tree_sha256'):
+        raise sg.ContractError('Baseline source differs from the frozen study pin')
+    cases = load_cases(oracle)
+    state, reason, exit_code, passed, elapsed = _run_cases(
+        bwrap=bwrap, candidate=source, scratch=scratch, task=task, cases=cases,
+        protected=protected, worker_uid=worker_uid, worker_gid=worker_gid)
+    if sealed_digest(source) != source_hash or sealed_digest(oracle) != oracle_hash:
+        state, reason = 'INCONCLUSIVE', 'TRUSTED_SNAPSHOT_CHANGED'
+    return {'schema': 'kotze.baseline-reproduction.v1', 'study_id': study['study_id'],
+            'manifest_sha256': digest, 'task_id': task_id, 'base_sha': task['base_sha'],
+            'source_tree_sha256': source_hash, 'oracle_sha256': oracle_hash,
+            'state': state, 'reason': reason, 'exit_code': exit_code,
+            'case_count': len(cases), 'passed_cases': passed,
+            'elapsed_seconds': round(elapsed, 6), 'visibility': 'host-only',
+            'defect_reproduced': state == 'FAIL'}
+
+
+def grade(*, trusted: Path, manifest: Path, oracle: Path, candidate: Path,
+          scratch: Path, receipts: Path, task_id: str, arm: str,
+          candidate_tree_sha256: str, worker_uid: int, worker_gid: int) -> dict:
+    bwrap, study, digest, task, protected, oracle, candidate, scratch, receipts, oracle_hash = _admit(
+        trusted=trusted, manifest=manifest, oracle=oracle, candidate=candidate,
+        scratch=scratch, receipts=receipts, task_id=task_id, arm=arm,
+        worker_uid=worker_uid, worker_gid=worker_gid)
     candidate_hash = sealed_digest(candidate)
     if candidate_hash != candidate_tree_sha256:
         raise sg.ContractError('Candidate does not match sealed pin')
     cases = load_cases(oracle)
-    argv = task['runner']
-    if not isinstance(argv, list) or not argv:
-        raise sg.ContractError('Missing host-registered runner')
-    hc.worker_command(bwrap, candidate, argv)
-    timeout = task.get('timeout_seconds', 60)
-    start = time.monotonic()
-    state = 'PASS'
-    reason = 'TRUSTED_RUNNER_EXIT'
-    exit_code = 0
-    passed = 0
-    for _, input_data, expected in cases:
-        remaining = timeout - (time.monotonic() - start)
-        if remaining <= 0:
-            state, reason, exit_code = 'INCONCLUSIVE', 'HOST_TEST_TIMEOUT', None
-            break
-        state, exit_code = execute_one(bwrap=bwrap, candidate=candidate, scratch=scratch,
-                                       argv=argv, input_data=input_data, timeout=remaining,
-                                       expected=expected, protected=protected,
-                                       worker_uid=worker_uid, worker_gid=worker_gid)
-        if state != 'PASS':
-            reason = 'TRUSTED_RUNNER_EXIT' if state == 'FAIL' else 'HOST_TEST_INCONCLUSIVE'
-            break
-        passed += 1
+    state, reason, exit_code, passed, elapsed = _run_cases(
+        bwrap=bwrap, candidate=candidate, scratch=scratch, task=task, cases=cases,
+        protected=protected, worker_uid=worker_uid, worker_gid=worker_gid)
     if sealed_digest(candidate) != candidate_hash or sealed_digest(oracle) != oracle_hash:
         state, reason, exit_code = 'INCONCLUSIVE', 'TRUSTED_SNAPSHOT_CHANGED', None
     record = {
@@ -212,7 +279,7 @@ def grade(*, trusted: Path, manifest: Path, oracle: Path, candidate: Path,
         'base_sha': task['base_sha'], 'oracle_sha256': oracle_hash,
         'candidate_tree_sha256': candidate_hash, 'state': state,
         'reason': reason, 'exit_code': exit_code,
-        'elapsed_seconds': round(time.monotonic() - start, 6),
+        'elapsed_seconds': round(elapsed, 6),
         'sandbox': 'linux-bubblewrap-unshare-all',
         'independent_execution_attestation': 'TRUSTED_HOST_CONFIGURATION_REQUIRED',
         'grader_protocol': PROTOCOL, 'oracle_visibility': 'host-only',

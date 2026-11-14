@@ -116,6 +116,80 @@ def prepare_worker_workspace(work: Path, worker_uid: int, worker_gid: int) -> No
     os.chown(work, worker_uid, worker_gid, follow_symlinks=False)
 
 
+def revoke_worker_workspace(work: Path) -> None:
+    """Return a staged tree to exclusive host ownership BEFORE any validation.
+
+    The worker namespace is gone when Bubblewrap exits (--die-with-parent and a
+    private PID namespace), but any *other* process running as the shared worker
+    UID could still rewrite the 0700 worker-owned tree between the host's
+    edit-scope check and the digest/seal. Revoking ownership top-down first
+    closes that window: after the root fchown/fchmod no worker-UID path lookup
+    can enter the tree. Hard links fail closed here; symlinks/special files are
+    lchown'ed and later rejected by the descriptor snapshot.
+    """
+    uid, gid = os.geteuid(), os.getegid()
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    try:
+        rootfd = secure_snapshot._open_directory(work)
+    except (OSError, secure_snapshot.SnapshotError) as exc:
+        raise Refused('Worker workspace vanished or was substituted') from exc
+
+    def walk(fd: int, depth: int) -> None:
+        if depth > secure_snapshot.MAX_DEPTH:
+            raise Refused('Worker workspace nesting exceeds bounded policy')
+        os.fchown(fd, uid, gid)
+        os.fchmod(fd, 0o700)
+        for name in os.listdir(fd):
+            info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            if stat.S_ISDIR(info.st_mode):
+                child = os.open(name, flags, dir_fd=fd)
+                try:
+                    current = os.fstat(child)
+                    if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino):
+                        raise Refused('Worker directory switched during ownership revocation')
+                    walk(child, depth + 1)
+                finally:
+                    os.close(child)
+            elif stat.S_ISREG(info.st_mode) and info.st_nlink != 1:
+                raise Refused('Worker created a hard-linked file')
+            else:
+                os.chown(name, uid, gid, dir_fd=fd, follow_symlinks=False)
+
+    try:
+        walk(rootfd, 0)
+    except OSError as exc:
+        raise Refused('Worker workspace ownership could not be revoked') from exc
+    finally:
+        os.close(rootfd)
+
+
+def publish_content_addressed(candidate: Path, publish_parent: Path) -> Path:
+    """Give a sealed candidate its stable name ``sha256-<tree digest>``.
+
+    The verifier service resolves candidates from the C11 work's candidate SHA,
+    never from a client-supplied path. Same-parent atomic rename, no copy. An
+    already existing identical tree (same content from an earlier run) is
+    reused; any different content under that name is refused.
+    """
+    candidate = strict_dir(candidate)
+    publish_parent = strict_dir(publish_parent, private=True)
+    if candidate.parent != publish_parent:
+        raise Refused('Only a candidate published in this parent can be sealed')
+    digest = digest_tree(candidate)
+    name = 'sha256-' + digest
+    target = publish_parent / name
+    if candidate == target:
+        return target
+    try:
+        publish_noreplace(candidate, publish_parent, name)
+    except Refused:
+        if not target.is_dir() or target.is_symlink() or digest_tree(target) != digest:
+            raise
+    if digest_tree(target) != digest:
+        raise Refused('Content-addressed candidate changed during sealing')
+    return target
+
+
 def protected_paths(manifest: Path, task_id: str) -> tuple[dict, dict, str, set[Path]]:
     if manifest.is_symlink() or not manifest.is_file():
         raise Refused('Manifest must be a regular host file')
@@ -202,11 +276,101 @@ def strip_protected(root: Path, paths: set[Path]) -> None:
             raise Refused('Worker shadowed a protected path with a directory')
 
 
+def enforce_edit_scope(source: Path, workspace: Path, excluded: set[Path],
+                       allowed_changed_path: str) -> None:
+    """Only the explicitly selected source path may change in this sandbox step.
+
+    This is an independent host-side check; worker-controlled test output cannot
+    authorize changing fixture or test bytes. The full stable tree must change;
+    unrelated files and directories may not change. This policy is only for
+    one existing Python source file, never tests or runtime hooks.
+    """
+    if type(allowed_changed_path) is not str:
+        raise Refused('Invalid single-file edit scope')
+    allowed = Path(allowed_changed_path)
+    if (not allowed_changed_path or allowed.is_absolute()
+            or any(part in ('', '.', '..', '.git', '__pycache__', 'tests')
+                   for part in allowed.parts)
+            or not allowed_changed_path.endswith('.py')
+            or allowed.name.startswith('test_')
+            or allowed.name in ('conftest.py', 'sitecustomize.py', 'usercustomize.py')
+            or str(allowed) != allowed_changed_path
+            or allowed in excluded
+            or any(parent in excluded for parent in allowed.parents)):
+        raise Refused('Invalid single-file edit scope')
+    # Resolve the selected existing file through O_NOFOLLOW directory handles.
+    # A deleted, substituted or hard-linked target cannot be accepted.
+    for tree in (source, workspace):
+        parentfd = os.open(tree, os.O_RDONLY | os.O_DIRECTORY |
+                           os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            for component in allowed.parts[:-1]:
+                childfd = os.open(component, os.O_RDONLY | os.O_DIRECTORY |
+                                  os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parentfd)
+                os.close(parentfd)
+                parentfd = childfd
+            selected = os.open(allowed.parts[-1], os.O_RDONLY |
+                               os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parentfd)
+            try:
+                info = os.fstat(selected)
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                    raise Refused('Selected source is not a regular single-link file')
+            finally:
+                os.close(selected)
+        except OSError as exc:
+            raise Refused('Selected source file vanished or was substituted') from exc
+        finally:
+            os.close(parentfd)
+    # One descriptor pass per tree (was four digests + two inventories): the
+    # full digest, the digest without the authorised file, and the directory
+    # shape (file digests deliberately omit empty directories).
+    source_dirs: set[Path] = set()
+    worker_dirs: set[Path] = set()
+    try:
+        before_full, before_other = secure_snapshot.tree(
+            source, excluded=frozenset(excluded), split=allowed, directories=source_dirs)
+        after_full, after_other = secure_snapshot.tree(
+            workspace, excluded=frozenset(excluded), split=allowed, directories=worker_dirs)
+    except secure_snapshot.SnapshotError as exc:
+        raise Refused('Edit scope snapshot rejected') from exc
+    if before_other != after_other:
+        raise Refused('Worker modified files outside authorized source path')
+    if source_dirs != worker_dirs:
+        raise Refused('Worker changed directories outside authorized edit scope')
+    if before_full == after_full:
+        raise Refused('Worker did not change the authorized source')
+
+
+def host_runtime_executable(path: str) -> str:
+    """Pin a system interpreter to its canonical root-owned file under /usr.
+
+    Debian/Ubuntu commonly ship /usr/bin/python3 -> /etc/alternatives/python3.
+    /etc is deliberately NOT mounted into the worker, so an unresolved link
+    fails inside the sandbox. The host resolves it once and refuses any target
+    outside the read-only /usr bind or with worker-writable ownership.
+    /work/ executables are candidate files and are left untouched.
+    """
+    if path.startswith('/work/'):
+        return path
+    try:
+        resolved = Path(os.path.realpath(path, strict=True))
+    except OSError as exc:
+        raise Refused('Worker runtime executable absent on host') from exc
+    if resolved.parts[:2] != ('/', 'usr'):
+        raise Refused('Worker runtime executable must resolve inside /usr')
+    info = resolved.stat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+            or info.st_mode & 0o022 or not info.st_mode & 0o111):
+        raise Refused('Worker runtime executable must be a root-owned executable')
+    return str(resolved)
+
+
 def worker_command(bwrap: str, workspace: Path, argv: list[str]) -> list[str]:
     if not argv or any(not isinstance(s, str) or not s or '\x00' in s for s in argv):
         raise Refused('Worker must have a nonempty argument vector')
     if not argv[0].startswith(('/work/', '/usr/', '/bin/')) or '..' in Path(argv[0]).parts:
         raise Refused('Worker executable must be under /work, /usr or /bin')
+    argv = [host_runtime_executable(argv[0])] + list(argv[1:])
     cmd = [bwrap, '--die-with-parent', '--new-session', '--unshare-all',
            '--unshare-user', '--unshare-net', '--unshare-pid',
            '--clearenv', '--setenv', 'PATH', '/usr/bin:/bin',
@@ -223,13 +387,18 @@ def worker_command(bwrap: str, workspace: Path, argv: list[str]) -> list[str]:
 def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
                source: Path, expected_source_sha256: str, scratch: Path,
                publish_parent: Path, output_name: str, argv: list[str],
-               worker_uid: int, worker_gid: int, timeout: int = 120) -> dict:
+               worker_uid: int, worker_gid: int, timeout: int = 120,
+               capture_report: bool = False,
+               allowed_changed_path: str | None = None,
+               stdin_data: bytes | None = None) -> dict:
     if os.name != 'posix' or sys.platform != 'linux':
         raise Refused('Linux namespace sandbox required')
     bwrap = trusted_bwrap_path()
     require_worker_identity(worker_uid, worker_gid)
     if arm not in ('BASE', 'SKILL') or type(timeout) is not int or not 1 <= timeout <= 300:
         raise Refused('Invalid arm or worker timeout')
+    if stdin_data is not None and (type(stdin_data) is not bytes or len(stdin_data) > 16384):
+        raise Refused('Worker stdin payload must be bytes and no larger than 16 KiB')
     if not output_name or output_name in ('.', '..') or '/' in output_name or '\\' in output_name:
         raise Refused('Output name must be one plain path component')
     if len(expected_source_sha256) != 64 or any(c not in '0123456789abcdef' for c in expected_source_sha256):
@@ -243,8 +412,18 @@ def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
     for path in (source, scratch, publish_parent):
         if within(path, trusted) or within(trusted, path):
             raise Refused('Trusted root overlaps any worker storage location')
+    # A later repair step legitimately starts from the previous step's sealed,
+    # host-owned publication (a *direct* child of publish_parent). Anything
+    # deeper, or publication into the source tree, remains forbidden.
+    reused_publication = False
+    if source.parent == publish_parent:
+        info = source.stat()
+        if info.st_uid != os.geteuid() or info.st_mode & 0o222:
+            raise Refused('Only a sealed read-only host publication may be reused as source')
+        reused_publication = True
     if (source == scratch or within(source, scratch) or within(scratch, source)
-            or source == publish_parent or within(source, publish_parent)
+            or source == publish_parent
+            or (within(source, publish_parent) and not reused_publication)
             or within(publish_parent, source) or scratch == publish_parent
             or within(scratch, publish_parent) or within(publish_parent, scratch)):
         raise Refused('Source, scratch and publication directories must not overlap')
@@ -274,22 +453,44 @@ def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
             resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
         try:
             with stdout.open('wb') as out, stderr.open('wb') as err:
-                proc = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
-                                        close_fds=True, start_new_session=True, preexec_fn=limits,
-                                        user=worker_uid, group=worker_gid, extra_groups=[],
-                                        env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'})
+                proc = subprocess.Popen(
+                    command, stdin=(subprocess.PIPE if stdin_data is not None else subprocess.DEVNULL),
+                    stdout=out, stderr=err, close_fds=True, start_new_session=True,
+                    preexec_fn=limits, user=worker_uid, group=worker_gid, extra_groups=[],
+                    env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'})
                 try:
-                    status = proc.wait(timeout=timeout)
+                    if stdin_data is not None:
+                        proc.communicate(input=stdin_data, timeout=timeout)
+                        status = proc.returncode
+                    else:
+                        status = proc.wait(timeout=timeout)
                 except subprocess.TimeoutExpired:
                     os.killpg(proc.pid, signal.SIGKILL)
-                    proc.wait()
+                    proc.communicate()
                     raise Refused('Worker timed out; no candidate published')
         except OSError as exc:
             raise Refused('Worker process or sandbox failed to start') from exc
-        if status != 0:
-            raise Refused(f'Worker exited {status}; no candidate published')
-        strip_protected(workspace, excluded)
-        candidate_sha = digest_tree(workspace)
+        # Optional bounded, explicitly UNTRUSTED step telemetry; it is never a
+        # verifier receipt or an authority claim. Reject oversized output.
+        report = None
+        if capture_report:
+            if stdout.stat().st_size > 12288:
+                raise Refused('Worker telemetry exceeded hard output limit')
+            report = stdout.read_bytes().decode('utf-8', 'replace')
+        try:
+            if status != 0:
+                raise Refused(f'Worker exited {status}; no candidate published')
+            # Close the shared-worker-UID TOCTOU window before ANY validation.
+            revoke_worker_workspace(workspace)
+            strip_protected(workspace, excluded)
+            if allowed_changed_path is not None:
+                enforce_edit_scope(source, workspace, excluded, allowed_changed_path)
+            candidate_sha = digest_tree(workspace)
+        except Refused as exc:
+            # Let the trusted caller show the bounded UNTRUSTED diagnostic to the
+            # model (e.g. "old text not found"); nothing was published.
+            exc.worker_report_untrusted = report
+            raise
         # Cross-device safe: stage in the publication parent, then atomically rename.
         with tempfile.TemporaryDirectory(prefix='.kotze-publish-', dir=publish_parent) as staged:
             final = Path(staged) / 'candidate'
@@ -300,13 +501,16 @@ def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
             if output.exists() or output.is_symlink():
                 raise Refused('Output was created concurrently')
             publish_noreplace(final, publish_parent, output_name)
-        return {'schema': SCHEMA, 'study_id': study.get('study_id'),
+        outcome = {'schema': SCHEMA, 'study_id': study.get('study_id'),
                 'task_id': task_id, 'arm': arm, 'base_sha': task.get('base_sha'),
                 'manifest_sha256': manifest_sha, 'input_tree_sha256': source_sha,
                 'candidate_tree_sha256': candidate_sha, 'output': str(output),
                 'worker_host_uid': worker_uid, 'worker_host_gid': worker_gid,
                 'worker_exit_code': status, 'worker_elapsed_seconds': round(time.monotonic()-start, 6),
                 'verified': False, 'oracle_mounted': False}
+        if capture_report:
+            outcome['worker_report_untrusted'] = report
+        return outcome
 
 
 def main() -> int:
@@ -318,6 +522,10 @@ def main() -> int:
     p.add_argument('--worker-uid', type=int, required=True)
     p.add_argument('--worker-gid', type=int, required=True)
     p.add_argument('--timeout', type=int, default=120)
+    p.add_argument('--capture-report', action='store_true',
+                   help='return bounded untrusted worker stdout, never a receipt')
+    p.add_argument('--allowed-changed-path',
+                   help='Optional exact one-file edit scope, enforced before publication')
     p.add_argument('argv', nargs=argparse.REMAINDER)
     a = vars(p.parse_args())
     a['argv'] = a['argv'][1:] if a['argv'][:1] == ['--'] else a['argv']

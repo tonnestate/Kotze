@@ -76,6 +76,22 @@ class HostControllerTests(unittest.TestCase):
             with patch.object(h.subprocess, 'Popen', side_effect=fake_spawn):
                 return h.run_worker(**self.args), events
 
+    def test_rejects_oversized_private_stdin_before_process_launch(self):
+        with patch.object(h, 'trusted_bwrap_path', return_value='/usr/bin/bwrap'):
+            with patch.object(h, 'require_worker_identity', return_value=None):
+                with patch.object(h.subprocess, 'Popen') as spawn:
+                    with self.assertRaisesRegex(h.Refused, '16 KiB'):
+                        h.run_worker(**self.args, stdin_data=b'x' * 16385)
+                    spawn.assert_not_called()
+
+    def test_rejects_text_stdin_to_avoid_implicit_encoding(self):
+        with patch.object(h, 'trusted_bwrap_path', return_value='/usr/bin/bwrap'):
+            with patch.object(h, 'require_worker_identity', return_value=None):
+                with patch.object(h.subprocess, 'Popen') as spawn:
+                    with self.assertRaisesRegex(h.Refused, 'must be bytes'):
+                        h.run_worker(**self.args, stdin_data='secret text')
+                    spawn.assert_not_called()
+
     def test_publishes_worker_candidate_without_hidden_oracle(self):
         def change(work):
             (work / 'src.py').write_text('print(456)\n')

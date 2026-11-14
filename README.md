@@ -6,7 +6,7 @@ StrawberryMe is now a [priority performance donor for adaptive source navigation
 
 The [native, AppleMe-inspired trajectory guard](docs/TRAJECTORY_ASSURANCE_NATIVE.md) adds an independently authored C11 O(1) observation/anti-loop advisory with provenance-tiered evidence, explicit unknown-progress semantics, completion-to-verifier routing and a local performance benchmark. **It is not yet integrated with the live Gemma ADK agent or the existing transactional reducer.** Its goal is to reduce pointless repair steps only where a paired task evaluation proves that it helps.
 
-The [live isolation acceptance probe](docs/ISOLATION_ACCEPTANCE.md) now checks real Linux namespace, filesystem, environment and loopback-network separation using an explicit different worker OS identity. It has not passed in this environment because bubblewrap is absent. Sandbox construction now requires `--unshare-user` explicitly instead of relying on the optional user-namespace behavior of `--unshare-all`. The [phase-2.1 descriptor snapshot and atomic publication](docs/SNAPSHOT_SEALING.md) now use O_NOFOLLOW/open-directory-fd anchored reads, source mutation checks, host-owned read-only snapshots, fsync before publishing, and Linux renameat2(RENAME_NOREPLACE). This closes several path-traversal and overwrite races but is not an immutable filesystem or verified production security boundary.
+The [live isolation acceptance probe](docs/ISOLATION_ACCEPTANCE.md) now checks real Linux namespace, filesystem, environment and loopback-network separation using an explicit different worker OS identity. It passed live (14/14 kernel checks) on one Linux 6.18 cloud VM with bubblewrap 0.9.0 during the [E2E acceptance](docs/E2E_ACCEPTANCE.md); other kernels/distributions remain unverified. Sandbox construction now requires `--unshare-user` explicitly instead of relying on the optional user-namespace behavior of `--unshare-all`. The [phase-2.1 descriptor snapshot and atomic publication](docs/SNAPSHOT_SEALING.md) now use O_NOFOLLOW/open-directory-fd anchored reads, source mutation checks, host-owned read-only snapshots, fsync before publishing, and Linux renameat2(RENAME_NOREPLACE). This closes several path-traversal and overwrite races but is not an immutable filesystem or verified production security boundary.
 
 The [phase-2.0 identity boundary](docs/WORKER_IDENTITY_BOUNDARY.md) now requires a separate explicit non-root host UID/GID and a vetted root-owned Bubblewrap executable for the worker host and confidential grader; real Bubblewrap isolation and authenticated host IPC remain unverified.
 
@@ -20,7 +20,7 @@ The legacy [external skill grader](docs/SKILL_GRADER.md) can **no longer launch 
 
 The optional [Gemma worker adapter](docs/GEMMA_WORKER.md) binds local Ollama, Google's hosted Gemma 4 API, and OpenRouter's free Gemma 4 variants to the C11 MODEL-action reservation. Its responses are **unverified proposals**, not executed patches or grader receipts. Hosted calls require explicit domain-upload approval.
 
-**This is not yet an autonomous coding agent.** Model proposal HTTP calls are available via an optional trusted-host adapter; autonomous tool execution, source-code editing, **live-tested** worker isolation, a confidential oracle protocol, and integrated end-to-end repair verification remain unfinished. The CLI is a trusted local diagnostic interface, **not** an externally accessible API or a security boundary against malicious workers. A future host service must enforce caller identity and execute only journaled, authorized tool actions. In particular, passing `VERIFIER` on this CLI is *not* independent proof by itself.
+**Status (Phase 2.6):** the complete repair path — registered C11 work, host-only baseline reproduction, journaled repair loop in live Bubblewrap workers, sealed candidate, confidential oracle, SO_PEERCRED verifier, native C11 final state — is integrated and live-tested with a **deterministic scripted repair** (see below). A model-driven (Gemma) repair has **not** been executed yet; no repair-rate or scientific claim is made. The CLI is a trusted local diagnostic interface, **not** an externally accessible API or a security boundary against malicious workers. A future host service must enforce caller identity and execute only journaled, authorized tool actions. In particular, passing `VERIFIER` on this CLI is *not* independent proof by itself.
 
 ## Local build (no GitHub Actions / hosted runners)
 
@@ -56,3 +56,29 @@ Full interfaces, state transitions, recovery boundaries, donor decisions, and ac
 ## Phase 2.4: OS-authenticated verifier admission
 
 The draft [verifier IPC service](docs/VERIFIER_IPC.md) uses Linux SO_PEERCRED on a private Unix socket to admit only an explicitly configured verifier UID/GID. The worker cannot supply files, an oracle, receipt content, verifier actor, C11 event ID or decision. The trusted service revalidates the host-private receipt and delegates to the existing C11 bridge. Local contract tests and a synthetic real-UID socket denial passed; full native C11 end-to-end testing and live Bubblewrap acceptance remain open. This is not deployed or merged.
+
+## Phase 2.5: Host-mediated Gemma repair vertical slice
+
+The draft [single-agent repair loop](docs/SINGLE_AGENT_REPAIR_LOOP.md) connects the existing C11-journaled Gemma model adapter to typed inspect/edit/test/submit actions and the existing Linux host-worker sandbox. Only one explicitly inspected Python source path can change per edit, enforced by an independent descriptor-based host comparison; public unittest feedback is explicitly untrusted. Each edit reserves/finishes a C11 WRITE action, and a successful loop emits a host-owned revision-bound CANDIDATE_SEALED event, requiring C11 VERIFYING before returning an UNVERIFIED_CANDIDATE_READY snapshot for the confidential grader. Nine local synthetic sandbox-step checks now pass against the exact current repair_step.py Git blob, plus three targeted current-code denial probes; baseline/skill pinning, host edit-scope and directory-shape regression tests still lack a full checked-out repository test run. A host-owned baseline source SHA, immutable SKILL manifest hash and exact C11 work/oracle identity are now required. Full model/host/independent grader integration, live Bubblewrap and independent repair-rate benchmarking remain open. Not merged, deployed, or submitted to Kaggle.
+
+## Phase 2.6: Integrated end-to-end repair and live acceptance A–J
+
+[`tools/repair_pipeline.py`](tools/repair_pipeline.py) drives one registered C11 AUTO work through
+`CONTRACT_VALID → BUG_REPRODUCED → CAUSE_SUPPORTED → PLAN_AUTHORIZED → CANDIDATE_SEALED → VERIFY_*`.
+The model (or the clearly labelled deterministic `scripted` control arm) only proposes
+`inspect`/`edit_test`/`submit`; MODEL, READ, WRITE and TEST are reserved in C11 before they run;
+grading runs in a separate isolated process; only the kernel-authenticated verifier service applies
+the verification event.
+
+`sudo make acceptance` ran live on one Linux VM (bubblewrap 0.9.0, distinct worker and verifier UIDs):
+all 16 criteria passed — correct patch → `VERIFY_PASS` (8/8 hidden cases); two public-test-passing
+incorrect patches and a candidate faking a green unittest run → `VERIFY_FAIL`; test tampering, forged
+receipts, foreign candidate/oracle hashes, stale revisions, replays, missing bwrap and invalid worker
+identities refused; no hidden-oracle canary in any transcript or candidate. Eight integration and
+security defects found on the way were fixed (e.g. Debian `/usr/bin/python3` alternatives link broke
+every real worker; second repair step impossible; shared-worker-UID TOCTOU before sealing).
+Details, timings and open limitations: [docs/E2E_ACCEPTANCE.md](docs/E2E_ACCEPTANCE.md), raw evidence
+in [docs/evidence/](docs/evidence/).
+
+Not done: Gemma execution (no model endpoint reachable from the test environment), multi-host or
+cryptographic receipt provenance, any BASE/SKILL study. Not merged, deployed or submitted.

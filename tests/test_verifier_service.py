@@ -38,7 +38,7 @@ class IPCContractTests(unittest.TestCase):
         uid, gid = os.geteuid(), os.getegid()
         self.c = v.Config(Path('/some/socket'), Path('/some/trusted'), Path('/some/db'),
                           Path('/some/core'), Path('/some/manifest'), Path('/some/receipts'),
-                          Path('/some/candidate'), Path('/some/oracle'), uid, gid, uid + 1)
+                          Path('/some/candidates'), Path('/some/oracle'), uid, gid, uid + 1)
 
     def test_real_kernel_peercred_self(self):
         if not hasattr(socket, 'SO_PEERCRED'):
