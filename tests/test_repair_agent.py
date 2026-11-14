@@ -133,8 +133,8 @@ class WorkIdentityTests(unittest.TestCase):
         self.db = Path(self.temp.name) / 'control.sqlite'
         self.task = {'base_sha': 'baseline', 'oracle_sha256': 'private-oracle-hash'}
         with sqlite3.connect(self.db) as conn:
-            conn.execute('CREATE TABLE works(id TEXT,state TEXT,mode TEXT,base_sha TEXT,oracle_hash TEXT,revision INTEGER)')
-            conn.execute("INSERT INTO works VALUES('w','REPAIRING','AUTO','baseline','private-oracle-hash',3)")
+            conn.execute('CREATE TABLE works(id TEXT,state TEXT,mode TEXT,base_sha TEXT,oracle_hash TEXT,revision INTEGER,candidate_sha TEXT)')
+            conn.execute("INSERT INTO works VALUES('w','REPAIRING','AUTO','baseline','private-oracle-hash',3,'')")
 
     def test_exact_repair_work_identity(self):
         self.assertEqual(agent.validate_work_identity(self.db, 'w', self.task), 3)
@@ -154,6 +154,34 @@ class WorkIdentityTests(unittest.TestCase):
             conn.execute("UPDATE works SET state='REPAIRING',mode='PLAN' WHERE id='w'")
         with self.assertRaisesRegex(agent.Rejected, 'AUTO REPAIRING'):
             agent.validate_work_identity(self.db, 'w', self.task)
+
+    def test_candidate_seal_emits_host_controller_event_and_checks_real_db_state(self):
+        args = Namespace(core_bin=Path('/host/core'), db=self.db, work_id='w',
+                         task_id='task-1', event_prefix='trial')
+        sha = 'a' * 64
+        def simulate_native(command, **kwargs):
+            self.assertEqual(command[2], 'event')
+            self.assertEqual(command[5], 'CANDIDATE_SEALED')
+            self.assertEqual(command[6], 'CONTROLLER')
+            self.assertEqual(command[8], sha)
+            self.assertEqual(command[-1], '3')
+            with sqlite3.connect(self.db) as conn:
+                conn.execute("UPDATE works SET state='VERIFYING',revision=4,candidate_sha=? WHERE id='w'", (sha,))
+            return type('R', (), {'returncode': 0, 'stdout': 'OK: transaction committed'})()
+        with patch.object(agent.subprocess, 'run', side_effect=simulate_native):
+            handoff = agent.seal_candidate(args, self.task, 3, sha, 'b' * 64)
+        self.assertEqual(handoff['state'], 'VERIFYING')
+        self.assertEqual(handoff['revision'], 4)
+        self.assertTrue(handoff['evidence_ref'].startswith('sha256:'))
+
+    def test_candidate_seal_rejects_native_status_without_state_commit(self):
+        args = Namespace(core_bin=Path('/host/core'), db=self.db, work_id='w',
+                         task_id='task-1', event_prefix='trial')
+        with patch.object(agent.subprocess, 'run') as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = 'OK: transaction committed'
+            with self.assertRaisesRegex(agent.Rejected, 'mismatched'):
+                agent.seal_candidate(args, self.task, 3, 'a' * 64, 'b' * 64)
 
     def test_write_reservation_is_native_write_not_model(self):
         args = Namespace(core_bin=Path('/host/core'), db=self.db, work_id='w',
@@ -211,6 +239,10 @@ class AgentLoopTests(unittest.TestCase):
         self.finish_patch = patch.object(agent, 'finish_write', return_value=None)
         self.finish_patch.start()
         self.addCleanup(self.finish_patch.stop)
+        self.seal_patch = patch.object(agent, 'seal_candidate', return_value={
+            'event_id': 'synthetic-seal', 'state': 'VERIFYING', 'revision': 4})
+        self.seal_patch.start()
+        self.addCleanup(self.seal_patch.stop)
 
     @staticmethod
     def message(op, **data):
@@ -247,6 +279,7 @@ class AgentLoopTests(unittest.TestCase):
                     result = agent.run(self.args)
         self.assertEqual(result['status'], 'UNVERIFIED_CANDIDATE_READY')
         self.assertFalse(result['verified'])
+        self.assertEqual(result['c11_handoff']['state'], 'VERIFYING')
         self.assertEqual([x['action'] for x in result['steps']],
                          ['inspect', 'edit_test'])
         self.assertEqual(len(transcripts), 3)
