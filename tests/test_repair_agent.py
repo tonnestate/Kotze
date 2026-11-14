@@ -288,6 +288,19 @@ class AgentLoopTests(unittest.TestCase):
         self.finish_patch = patch.object(agent, 'finish_write', return_value=None)
         self.finish_patch.start()
         self.addCleanup(self.finish_patch.stop)
+        self.actions = []
+        self.reserve_action_patch = patch.object(
+            agent, 'reserve_action',
+            side_effect=lambda _a, op, step, _fp: self.actions.append(op) or f'{op}-{step}')
+        self.reserve_action_patch.start()
+        self.addCleanup(self.reserve_action_patch.stop)
+        self.finish_action_patch = patch.object(agent, 'finish_action', return_value=None)
+        self.finish_action_patch.start()
+        self.addCleanup(self.finish_action_patch.stop)
+        self.publish_patch = patch.object(agent.hc, 'publish_content_addressed',
+                                          side_effect=lambda path, _parent: path)
+        self.publish_patch.start()
+        self.addCleanup(self.publish_patch.stop)
         self.seal_patch = patch.object(agent, 'seal_candidate', return_value={
             'event_id': 'synthetic-seal', 'state': 'VERIFYING', 'revision': 4})
         self.seal_mock = self.seal_patch.start()
@@ -385,9 +398,10 @@ class AgentLoopTests(unittest.TestCase):
                           return_value=(study, self.study_task, 'synthetic', set())):
             with patch.object(agent, '_model',
                               return_value={'proposal': self.message('submit')}) as model:
-                with self.assertRaisesRegex(agent.Rejected, 'Cannot submit'):
-                    agent.run(self.args)
+                self.args.max_steps = 1
+                result = agent.run(self.args)
                 model.assert_called_once()
+        self.assert_refused_without_candidate(result, 'Cannot submit')
 
     def test_forged_worker_content_digest_rejected_even_with_real_changed_file(self):
         actions = [self.message('inspect', path='calc.py'),
@@ -407,15 +421,78 @@ class AgentLoopTests(unittest.TestCase):
                         agent.run(self.args)
         self.seal_mock.assert_not_called()
 
+    def assert_refused_without_candidate(self, result, reason):
+        self.assertEqual(result['status'], 'NO_VERIFIED_REPAIR')
+        self.assertFalse(result['verified'])
+        self.assertIsNone(result['candidate'])
+        refused = [x for x in result['steps'] if x['action'] == 'rejected']
+        self.assertTrue(refused)
+        self.assertRegex(refused[0]['reason'], reason)
+        self.seal_mock.assert_not_called()
+
     def test_model_cannot_submit_without_patch(self):
         with patch.object(agent.hc, 'protected_paths',
                           return_value=({}, self.study_task, 'synthetic', set())):
             with patch.object(agent, '_model',
                               return_value={'proposal': self.message('submit')}):
                 with patch.object(agent.hc, 'run_worker') as run:
-                    with self.assertRaisesRegex(agent.Rejected, 'Cannot submit'):
-                        agent.run(self.args)
+                    result = agent.run(self.args)
                     run.assert_not_called()
+        self.assert_refused_without_candidate(result, 'Cannot submit')
+
+    def test_malformed_model_output_is_refused_then_loop_recovers(self):
+        actions = ['I fixed it, verified!',
+                   self.message('inspect', path='calc.py'),
+                   self.message('edit_test', path='calc.py', old='a - b', new='a + b'),
+                   self.message('submit')]
+        prompts = []
+        def model(_args, index, text):
+            prompts.append(text)
+            return {'proposal': actions[index - 1]}
+        with patch.object(agent.hc, 'protected_paths',
+                          return_value=({}, self.study_task, 'synthetic', set())):
+            with patch.object(agent, '_model', side_effect=model):
+                with patch.object(agent.hc, 'run_worker', side_effect=self.fake_stage):
+                    result = agent.run(self.args)
+        self.assertEqual(result['status'], 'UNVERIFIED_CANDIDATE_READY')
+        self.assertFalse(result['verified'])
+        self.assertEqual(result['steps'][0]['action'], 'rejected')
+        self.assertIn('REFUSED BY HOST', prompts[1])
+        self.assertEqual(self.actions, ['READ', 'TEST'])
+        self.assertEqual(result['metrics']['rejected_steps'], 1)
+
+    def test_worker_refusal_is_reported_and_not_published(self):
+        actions = [self.message('inspect', path='calc.py'),
+                   self.message('edit_test', path='calc.py', old='a - x', new='a + b')]
+        def refused(**_kw):
+            exc = hc.Refused('Worker did not change the authorized source')
+            exc.worker_report_untrusted = json.dumps(
+                {'status': 'EDIT_REJECTED', 'diagnostic': 'edit requires one exact occurrence'})
+            raise exc
+        with patch.object(agent.hc, 'protected_paths',
+                          return_value=({}, self.study_task, 'synthetic', set())):
+            with patch.object(agent, '_model',
+                              side_effect=lambda _a, i, _p: {'proposal': actions[(i - 1) % 2]}):
+                with patch.object(agent.hc, 'run_worker', side_effect=refused):
+                    with patch.object(agent, '_worker_runtime_still_admitted', return_value=None):
+                        self.args.max_steps = 2
+                        result = agent.run(self.args)
+        self.assert_refused_without_candidate(result, 'not published')
+        self.assertIn('one exact occurrence', result['steps'][1]['worker_report_untrusted'])
+
+    def test_degraded_isolation_runtime_after_refusal_is_fatal(self):
+        actions = [self.message('inspect', path='calc.py'),
+                   self.message('edit_test', path='calc.py', old='a - b', new='a + b')]
+        with patch.object(agent.hc, 'protected_paths',
+                          return_value=({}, self.study_task, 'synthetic', set())):
+            with patch.object(agent, '_model',
+                              side_effect=lambda _a, i, _p: {'proposal': actions[i - 1]}):
+                with patch.object(agent.hc, 'run_worker',
+                                  side_effect=hc.Refused('Worker exited 1')):
+                    with patch.object(agent.hc, 'trusted_bwrap_path',
+                                      side_effect=hc.Refused('bubblewrap absent')):
+                        with self.assertRaisesRegex(agent.Rejected, 'no longer admitted'):
+                            agent.run(self.args)
 
     def test_model_cannot_edit_python_startup_hook_even_after_inspection(self):
         (self.source / 'sitecustomize.py').write_text('value = 0\n')
@@ -428,9 +505,10 @@ class AgentLoopTests(unittest.TestCase):
             with patch.object(agent, '_model',
                               side_effect=lambda _args, step, _prompt: {'proposal': actions[step - 1]}):
                 with patch.object(agent.hc, 'run_worker') as run:
-                    with self.assertRaisesRegex(agent.Rejected, 'not editable'):
-                        agent.run(self.args)
+                    self.args.max_steps = 2
+                    result = agent.run(self.args)
                     run.assert_not_called()
+        self.assert_refused_without_candidate(result, 'not editable')
 
     def test_model_must_inspect_before_edit(self):
         action = self.message('edit_test', path='calc.py',
@@ -439,9 +517,9 @@ class AgentLoopTests(unittest.TestCase):
                           return_value=({}, self.study_task, 'synthetic', set())):
             with patch.object(agent, '_model', return_value={'proposal': action}):
                 with patch.object(agent.hc, 'run_worker') as run:
-                    with self.assertRaisesRegex(agent.Rejected, 'inspection'):
-                        agent.run(self.args)
+                    result = agent.run(self.args)
                     run.assert_not_called()
+        self.assert_refused_without_candidate(result, 'inspection')
 
     def test_runtime_preflight_happens_before_model_dispatch(self):
         self.preflight_patch.stop()
