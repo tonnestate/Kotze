@@ -190,10 +190,30 @@ def _model(args: argparse.Namespace, step: int, text: str) -> dict:
         return gm.execute(request)
 
 
+def preflight(args: argparse.Namespace) -> None:
+    """Refuse before any model call when runtime or trusted storage is unsafe."""
+    # The source must not overlap with the private contract, receipt or oracle.
+    trusted = hc.strict_dir(args.trusted, private=True)
+    source = hc.strict_dir(args.source)
+    scratch = hc.strict_stage_root(args.scratch)
+    published = hc.strict_dir(args.publish_parent, private=True)
+    if (args.manifest.is_symlink()
+            or not hc.within(args.manifest.resolve(strict=True), trusted)):
+        raise Rejected('Study manifest is not host-private')
+    for left, right in ((trusted, source), (trusted, scratch),
+                        (trusted, published), (source, scratch),
+                        (source, published), (scratch, published)):
+        if hc.within(left, right) or hc.within(right, left):
+            raise Rejected('Trusted and worker path roots may not overlap')
+    hc.require_worker_identity(args.worker_uid, args.worker_gid)
+    hc.trusted_bwrap_path()  # no paid/model request before isolation runtime admission
+
+
 def run(args: argparse.Namespace) -> dict:
     if (not 1 <= args.max_steps <= MAX_STEPS or args.model_timeout < 1
             or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,70}', args.event_prefix)):
         raise Rejected('Invalid loop policy')
+    preflight(args)
     # Existing role, manifest and protected path checks are enforced by host_controller.
     _, _, _, hidden = hc.protected_paths(args.manifest, args.task_id)
     current = args.source
