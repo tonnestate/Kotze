@@ -31,5 +31,6 @@ check: build/test-core build/test-trajectory build/kotze-core
 	python3 -m unittest discover -s tests -p "test_worker_os_boundary.py" -v
 	python3 -m unittest discover -s tests -p "test_secure_snapshot.py" -v
 	python3 -m unittest discover -s tests -p "test_verifier_service.py" -v
+	python3 -m unittest discover -s tests -p "test_repair_agent.py" -v
 clean:
 	rm -rf build
