@@ -270,6 +270,41 @@ def finish_write(args: argparse.Namespace, action_id: str, status: str) -> None:
         raise Rejected('C11 refused WRITE completion; candidate is not admitted')
 
 
+def seal_candidate(args: argparse.Namespace, task: dict, expected_revision: int,
+                   candidate_sha: str, initial_sha: str) -> dict:
+    """Host-only C11 handoff to VERIFYING, never a final correctness claim."""
+    if not isinstance(candidate_sha, str) or not re.fullmatch(r'[0-9a-f]{64}', candidate_sha):
+        raise Rejected('Invalid sealed snapshot digest')
+    event_id = f'{args.event_prefix}-candidate-sealed'
+    evidence = 'sha256:' + gm.digest(json.dumps(
+        {'schema': RESULT_SCHEMA, 'work_id': args.work_id,
+         'task_id': args.task_id, 'initial_tree_sha256': initial_sha,
+         'candidate_tree_sha256': candidate_sha, 'kind': 'HOST_SEALED_UNVERIFIED'},
+        sort_keys=True, separators=(',', ':')))
+    command = [str(args.core_bin), str(args.db), 'event',
+               args.work_id, event_id, 'CANDIDATE_SEALED', 'CONTROLLER',
+               evidence, candidate_sha, '-', '-', '-', str(expected_revision)]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True,
+                                check=False, timeout=15)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Rejected('Trusted C11 candidate seal event unavailable') from exc
+    if result.returncode or 'OK: transaction committed' not in result.stdout:
+        raise Rejected('C11 rejected candidate handoff to verifier')
+    try:
+        with sqlite3.connect(args.db.as_uri() + '?mode=ro', uri=True, timeout=5) as conn:
+            row = conn.execute(
+                'SELECT state,revision,candidate_sha,oracle_hash FROM works WHERE id=?',
+                (args.work_id,)).fetchone()
+    except sqlite3.Error as exc:
+        raise Rejected('Cannot validate C11 candidate seal transaction') from exc
+    if (row is None or row[0] != 'VERIFYING' or row[1] != expected_revision + 1
+            or row[2] != candidate_sha or row[3] != task['oracle_sha256']):
+        raise Rejected('C11 candidate seal outcome/identity mismatched')
+    return {'event_id': event_id, 'state': 'VERIFYING', 'revision': row[1],
+            'evidence_ref': evidence}
+
+
 def preflight(args: argparse.Namespace) -> None:
     """Refuse before any model call when runtime or trusted storage is unsafe."""
     # The source must not overlap with the private contract, receipt or oracle.
@@ -354,10 +389,12 @@ def run(args: argparse.Namespace) -> dict:
                 raise Rejected('Cannot submit without a changed candidate and passing public tests')
             if hc.digest_tree(current) != source_sha:
                 raise Rejected('Candidate changed before submission')
+            handoff = seal_candidate(args, task, work_revision, source_sha, initial_sha)
             return {'schema': RESULT_SCHEMA, 'status': 'UNVERIFIED_CANDIDATE_READY',
                     'work_id': args.work_id, 'task_id': args.task_id, 'arm': args.arm,
                     'initial_tree_sha256': initial_sha, 'candidate_tree_sha256': source_sha,
-                    'candidate': str(current), 'verified': False, 'steps': trail}
+                    'candidate': str(current), 'c11_handoff': handoff,
+                    'verified': False, 'steps': trail}
         _path(current, action['path'], hidden)
         if action['path'] not in inspected:
             raise Rejected('An exact source inspection is required before editing')
