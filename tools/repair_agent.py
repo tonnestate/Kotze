@@ -14,7 +14,9 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import sqlite3
 import stat
+import subprocess
 import sys
 import tempfile
 
@@ -190,6 +192,59 @@ def _model(args: argparse.Namespace, step: int, text: str) -> dict:
         return gm.execute(request)
 
 
+def validate_work_identity(db: Path, work_id: str, task: dict) -> None:
+    """Bind the repair process to the exact admitted AUTO work and private oracle."""
+    if not isinstance(work_id, str) or not work_id or len(work_id) > 128:
+        raise Rejected('Invalid C11 work identity')
+    try:
+        with sqlite3.connect(db.as_uri() + '?mode=ro', uri=True, timeout=5) as conn:
+            row = conn.execute(
+                'SELECT state,mode,base_sha,oracle_hash FROM works WHERE id=?',
+                (work_id,)).fetchone()
+    except sqlite3.Error as exc:
+        raise Rejected('Canonical C11 work state is unavailable') from exc
+    if row is None:
+        raise Rejected('C11 work is not registered')
+    state, mode, base, oracle = row
+    if state != 'REPAIRING' or mode != 'AUTO':
+        raise Rejected('Autonomous repair requires a previously authorized AUTO REPAIRING work')
+    if (not isinstance(task, dict) or not task.get('base_sha')
+            or not task.get('oracle_sha256') or base != task['base_sha']
+            or oracle != task['oracle_sha256']):
+        raise Rejected('Study base/oracle are not bound to the C11 work')
+
+
+def reserve_write(args: argparse.Namespace, step: int, fingerprint: str,
+                  source_sha: str) -> str:
+    """Reserve an actual C11 WRITE side effect (not merely a MODEL proposal)."""
+    action_id = f'{args.event_prefix}-write-{step:03d}'
+    environment = gm.digest('kotze-write-env-v1/' + str(args.worker_uid) + '/'
+                            + str(args.worker_gid) + '/bubblewrap/no-network')
+    cmd = [str(args.core_bin), str(args.db), 'action-reserve', args.work_id,
+           action_id, 'WRITE', fingerprint, environment, '0']
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                check=False, timeout=15)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Rejected('Native WRITE reservation unavailable') from exc
+    if (result.returncode or 'OK: transaction committed' not in result.stdout
+            or 'REPEAT' in result.stdout or 'REPLAY' in result.stdout):
+        raise Rejected('C11 refused untrusted edit WRITE reservation')
+    return action_id
+
+
+def finish_write(args: argparse.Namespace, action_id: str, status: str) -> None:
+    cmd = [str(args.core_bin), str(args.db), 'action-finish', action_id,
+           gm.digest(status)]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                check=False, timeout=15)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Rejected('Native WRITE completion unavailable') from exc
+    if result.returncode or 'OK: transaction committed' not in result.stdout:
+        raise Rejected('C11 refused WRITE completion; candidate is not admitted')
+
+
 def preflight(args: argparse.Namespace) -> None:
     """Refuse before any model call when runtime or trusted storage is unsafe."""
     # The source must not overlap with the private contract, receipt or oracle.
@@ -200,6 +255,15 @@ def preflight(args: argparse.Namespace) -> None:
     if (args.manifest.is_symlink()
             or not hc.within(args.manifest.resolve(strict=True), trusted)):
         raise Rejected('Study manifest is not host-private')
+    if (args.db.is_symlink() or not args.db.is_file()
+            or not hc.within(args.db.resolve(strict=True), trusted)):
+        raise Rejected('C11 database must be inside trusted root')
+    if (args.core_bin.is_symlink() or not args.core_bin.is_file()
+            or not os.access(args.core_bin, os.X_OK)):
+        raise Rejected('Trusted native reducer binary unavailable')
+    core_stat = args.core_bin.stat()
+    if core_stat.st_uid != os.geteuid() or core_stat.st_mode & 0o022:
+        raise Rejected('Native reducer executable is not host-owned and readonly')
     for left, right in ((trusted, source), (trusted, scratch),
                         (trusted, published), (source, scratch),
                         (source, published), (scratch, published)):
@@ -207,6 +271,10 @@ def preflight(args: argparse.Namespace) -> None:
             raise Rejected('Trusted and worker path roots may not overlap')
     hc.require_worker_identity(args.worker_uid, args.worker_gid)
     hc.trusted_bwrap_path()  # no paid/model request before isolation runtime admission
+    _, task, _, _ = hc.protected_paths(args.manifest, args.task_id)
+    if task.get('case_protocol') != 'host-oracle-stdin-v1':
+        raise Rejected('Only host-private stdin/out verification studies admitted')
+    validate_work_identity(args.db, args.work_id, task)
 
 
 def run(args: argparse.Namespace) -> dict:
@@ -215,7 +283,7 @@ def run(args: argparse.Namespace) -> dict:
         raise Rejected('Invalid loop policy')
     preflight(args)
     # Existing role, manifest and protected path checks are enforced by host_controller.
-    _, _, _, hidden = hc.protected_paths(args.manifest, args.task_id)
+    _, task, _, hidden = hc.protected_paths(args.manifest, args.task_id)
     current = args.source
     initial_sha = hc.digest_tree(current)
     seen = set()
@@ -228,6 +296,7 @@ def run(args: argparse.Namespace) -> dict:
     # Trusted host code itself is never copied into the candidate tree.
     script = Path(repair_step.__file__).read_text(encoding='utf-8')
     for step in range(1, args.max_steps + 1):
+        validate_work_identity(args.db, args.work_id, task)
         source_sha = hc.digest_tree(current)
         files = file_index(current, hidden)
         model_text = prompt(filenames=files, observations=observations,
@@ -265,16 +334,22 @@ def run(args: argparse.Namespace) -> dict:
         sandbox_action = dict(action)
         sandbox_action['schema'] = repair_step.SCHEMA
         output_name = f'{args.event_prefix}-step-{step:03d}'
-        stage = hc.run_worker(
-            trusted=args.trusted, manifest=args.manifest, task_id=args.task_id,
-            arm=args.arm, source=current, expected_source_sha256=source_sha,
-            scratch=args.scratch, publish_parent=args.publish_parent,
-            output_name=output_name,
-            argv=['/usr/bin/python3', '-I', '-B', '-c', script,
-                  json.dumps(sandbox_action, ensure_ascii=True, separators=(',', ':'))],
-            worker_uid=args.worker_uid, worker_gid=args.worker_gid,
-            timeout=args.worker_timeout, capture_report=True,
-            allowed_changed_path=action['path'])
+        write_id = reserve_write(args, step, fingerprint, source_sha)
+        worker_outcome = 'WORKER_EXECUTION_FAILED'
+        try:
+            stage = hc.run_worker(
+                trusted=args.trusted, manifest=args.manifest, task_id=args.task_id,
+                arm=args.arm, source=current, expected_source_sha256=source_sha,
+                scratch=args.scratch, publish_parent=args.publish_parent,
+                output_name=output_name,
+                argv=['/usr/bin/python3', '-I', '-B', '-c', script,
+                      json.dumps(sandbox_action, ensure_ascii=True, separators=(',', ':'))],
+                worker_uid=args.worker_uid, worker_gid=args.worker_gid,
+                timeout=args.worker_timeout, capture_report=True,
+                allowed_changed_path=action['path'])
+            worker_outcome = 'UNVERIFIED_CANDIDATE:' + stage['candidate_tree_sha256']
+        finally:
+            finish_write(args, write_id, worker_outcome)
         try:
             report = json.loads(stage['worker_report_untrusted'])
         except (KeyError, ValueError, TypeError) as exc:
