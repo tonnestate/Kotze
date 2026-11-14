@@ -39,51 +39,59 @@ def _under(rel: Path, excluded: set[Path]) -> bool:
     return any(rel == hidden or hidden in rel.parents for hidden in excluded)
 
 
-def _path(root: Path, text: str, excluded: set[Path]) -> Path:
+def _open_visible(root: Path, text: str, excluded: set[Path]) -> int:
+    """Open the exact allowed source inode via directory descriptors once."""
     if (type(text) is not str or not 1 <= len(text) <= 240
             or '\\' in text or '\x00' in text):
         raise Rejected('Unsafe source path')
     p = PurePosixPath(text)
     rel = Path(text)
-    if (p.is_absolute() or str(p) != text or any(part in ('.', '..', '.git', '__pycache__')
-                                              for part in p.parts)
+    if (p.is_absolute() or not p.parts or str(p) != text
+            or any(part in ('.', '..', '.git', '__pycache__') for part in p.parts)
             or _under(rel, excluded) or rel.suffix not in ALLOWED_SUFFIX):
         raise Rejected('Source path not in allowed visible tree')
-    # All path components resolve relative to a pinned host-owned tree, using
-    # O_NOFOLLOW. Do not trust a model's path or execute source during inspection.
-    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
     try:
-        for item in p.parts[:-1]:
-            nxt = os.open(item, os.O_RDONLY | os.O_DIRECTORY |
-                          os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
-            os.close(fd)
-            fd = nxt
-        file = os.open(p.parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+        fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
         try:
-            info = os.fstat(file)
-            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-                raise Rejected('Unsafe source inode')
+            for item in p.parts[:-1]:
+                nxt = os.open(item, os.O_RDONLY | os.O_DIRECTORY |
+                              os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+                os.close(fd)
+                fd = nxt
+            file = os.open(p.parts[-1], os.O_RDONLY |
+                           os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
         finally:
-            os.close(file)
+            os.close(fd)
     except OSError as exc:
         raise Rejected('Missing or unsafe source') from exc
-    finally:
-        os.close(fd)
-    return root / rel
+    info = os.fstat(file)
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        os.close(file)
+        raise Rejected('Unsafe source inode')
+    return file
+
+
+def _path(root: Path, text: str, excluded: set[Path]) -> Path:
+    fd = _open_visible(root, text, excluded)
+    os.close(fd)
+    return root / text
 
 
 def inspect(root: Path, name: str, excluded: set[Path]) -> str:
-    file = _path(root, name, excluded)
-    # Published snapshots are root-owned, readonly and not concurrently
-    # writable by the worker. The host rechecks the tree pin per model turn.
-    fd = os.open(file, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    # The model cannot influence path traversal beyond the host-approved tree.
+    # The SAME descriptor is used for both inode validation and reading.
+    fd = _open_visible(root, name, excluded)
     try:
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-            raise Rejected('Unsafe source inode')
+        before = os.fstat(fd)
         data = os.read(fd, MAX_INSPECT_BYTES + 1)
+        after = os.fstat(fd)
     finally:
         os.close(fd)
+    if ((before.st_dev, before.st_ino, before.st_size,
+         before.st_mtime_ns, before.st_ctime_ns) !=
+        (after.st_dev, after.st_ino, after.st_size,
+         after.st_mtime_ns, after.st_ctime_ns)):
+        raise Rejected('Source changed during bounded inspection')
     if len(data) > MAX_INSPECT_BYTES:
         raise Rejected('Source file too long for bounded inspection')
     try:
