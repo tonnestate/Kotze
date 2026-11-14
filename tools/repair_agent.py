@@ -214,26 +214,29 @@ def _model(args: argparse.Namespace, step: int, text: str) -> dict:
         return gm.execute(request)
 
 
-def validate_work_identity(db: Path, work_id: str, task: dict) -> None:
+def validate_work_identity(db: Path, work_id: str, task: dict) -> int:
     """Bind the repair process to the exact admitted AUTO work and private oracle."""
     if not isinstance(work_id, str) or not work_id or len(work_id) > 128:
         raise Rejected('Invalid C11 work identity')
     try:
         with sqlite3.connect(db.as_uri() + '?mode=ro', uri=True, timeout=5) as conn:
             row = conn.execute(
-                'SELECT state,mode,base_sha,oracle_hash FROM works WHERE id=?',
+                'SELECT state,mode,base_sha,oracle_hash,revision FROM works WHERE id=?',
                 (work_id,)).fetchone()
     except sqlite3.Error as exc:
         raise Rejected('Canonical C11 work state is unavailable') from exc
     if row is None:
         raise Rejected('C11 work is not registered')
-    state, mode, base, oracle = row
+    state, mode, base, oracle, revision = row
     if state != 'REPAIRING' or mode != 'AUTO':
         raise Rejected('Autonomous repair requires a previously authorized AUTO REPAIRING work')
     if (not isinstance(task, dict) or not task.get('base_sha')
             or not task.get('oracle_sha256') or base != task['base_sha']
             or oracle != task['oracle_sha256']):
         raise Rejected('Study base/oracle are not bound to the C11 work')
+    if type(revision) is not int or revision < 0:
+        raise Rejected('C11 work revision invalid')
+    return revision
 
 
 def reserve_write(args: argparse.Namespace, step: int, fingerprint: str,
@@ -318,7 +321,7 @@ def run(args: argparse.Namespace) -> dict:
     # Trusted host code itself is never copied into the candidate tree.
     script = Path(repair_step.__file__).read_text(encoding='utf-8')
     for step in range(1, args.max_steps + 1):
-        validate_work_identity(args.db, args.work_id, task)
+        work_revision = validate_work_identity(args.db, args.work_id, task)
         source_sha = hc.digest_tree(current)
         files = file_index(current, hidden)
         model_text = prompt(filenames=files, observations=observations,
@@ -326,6 +329,8 @@ def run(args: argparse.Namespace) -> dict:
         if len(model_text.encode('utf-8')) > gm.PROMPT_LIMIT - 20000:
             raise Rejected('Bounded model context exceeded')
         response = _model(args, step, model_text)
+        if validate_work_identity(args.db, args.work_id, task) != work_revision:
+            raise Rejected('C11 work changed while model proposed a step')
         action = parse_action(response['proposal'])
         fingerprint = hashlib.sha256(json.dumps(
             [source_sha, action], sort_keys=True, ensure_ascii=True).encode()).hexdigest()
@@ -359,6 +364,8 @@ def run(args: argparse.Namespace) -> dict:
         write_id = reserve_write(args, step, fingerprint, source_sha)
         worker_outcome = 'WORKER_EXECUTION_FAILED'
         try:
+            if validate_work_identity(args.db, args.work_id, task) != work_revision:
+                raise Rejected('C11 work changed after WRITE reservation')
             stage = hc.run_worker(
                 trusted=args.trusted, manifest=args.manifest, task_id=args.task_id,
                 arm=args.arm, source=current, expected_source_sha256=source_sha,
@@ -384,6 +391,8 @@ def run(args: argparse.Namespace) -> dict:
                     'PUBLIC_TESTS_PASS', 'PUBLIC_TESTS_FAIL', 'TEST_TIMEOUT')
                 or not isinstance(report.get('diagnostic'), str)):
             raise Rejected('Unexpected untrusted worker telemetry')
+        if validate_work_identity(args.db, args.work_id, task) != work_revision:
+            raise Rejected('C11 work changed during sandbox execution; candidate rejected')
         current = Path(stage['output'])
         inspected.clear()  # A changed source requires a fresh model inspection.
         if hc.digest_tree(current) != stage['candidate_tree_sha256']:
