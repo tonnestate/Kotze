@@ -389,6 +389,24 @@ class AgentLoopTests(unittest.TestCase):
                     agent.run(self.args)
                 model.assert_called_once()
 
+    def test_forged_worker_content_digest_rejected_even_with_real_changed_file(self):
+        actions = [self.message('inspect', path='calc.py'),
+                   self.message('edit_test', path='calc.py', old='a - b', new='a + b')]
+        def forged_stage(**kwargs):
+            result = self.fake_stage(**kwargs)
+            report = json.loads(result['worker_report_untrusted'])
+            report['after_sha256'] = '0' * 64
+            result['worker_report_untrusted'] = json.dumps(report)
+            return result
+        with patch.object(agent.hc, 'protected_paths',
+                          return_value=({}, self.study_task, 'synthetic', set())):
+            with patch.object(agent, '_model',
+                              side_effect=lambda _args, index, _prompt: {'proposal': actions[index - 1]}):
+                with patch.object(agent.hc, 'run_worker', side_effect=forged_stage):
+                    with self.assertRaisesRegex(agent.Rejected, 'host-observed source bytes'):
+                        agent.run(self.args)
+        self.seal_patch.assert_not_called()
+
     def test_model_cannot_submit_without_patch(self):
         with patch.object(agent.hc, 'protected_paths',
                           return_value=({}, self.study_task, 'synthetic', set())):
