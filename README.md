@@ -1,5 +1,7 @@
 # KOTZE Harness — Native C11 Control Core (Phase 1)
 
+**Gemma 4 Kaggle competition entry:** [build, test and submit instructions](docs/KAGGLE_SUBMISSION.md). The declarative `submission/` package and standalone `notebooks/KOTZE_Kaggle_Submission.ipynb` are separate from the C11 host-side repair harness. The package has offline structural tests; independent Kaggle Gemma repair-rate validation remains outstanding.
+
 The repository contains the first **C11/SQLite control-plane implementation** of KOTZE Harness. The library is language-agnostic and persists work identity, original requirements, event-driven finite-state transitions, repair candidates, verifier-bound outcome claims, enumerated hypotheses, action-budget reservations, anti-repeat decisions, and verified-success records.
 
 StrawberryMe is now a [priority performance donor for adaptive source navigation](docs/STRAWBERRYME_CURSOR_DONOR.md). The already existing but unmerged KOTZE `feat/kotze-recovery-resume` branch provides native C11/SQLite register cursors, bounded pages and async readers; integrating these with a runnable Gemma ADK repair loop is a planned step, **not** a delivered runtime feature. We will benchmark cursor-guided context against the Kaggle codegraph-tool baseline before adopting it.
