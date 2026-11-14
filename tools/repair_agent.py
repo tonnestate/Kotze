@@ -378,7 +378,7 @@ def run(args: argparse.Namespace) -> dict:
         raise Rejected('Invalid loop policy')
     preflight(args)
     # Existing role, manifest and protected path checks are enforced by host_controller.
-    _, task, _, hidden = hc.protected_paths(args.manifest, args.task_id)
+    study, task, _, hidden = hc.protected_paths(args.manifest, args.task_id)
     current = args.source
     initial_sha = hc.digest_tree(current)
     # A C11 base_sha is an opaque baseline/commit identifier and need not be
@@ -401,9 +401,12 @@ def run(args: argparse.Namespace) -> dict:
     trail = []
     skill_digest = None
     if args.skill_file is not None:
-        # Pin content across all model turns, not only the filename. Worker
-        # observations cannot replace or tune a skill during a paired study.
+        # Pin content across all model turns AND to the independent original
+        # manifest. A CLI skill/version swap would invalidate a paired study.
         skill_digest = gm.digest(gm.read_prompt(args.skill_file))
+        if (not isinstance(study, dict) or
+                study.get('skill_sha256') != skill_digest):
+            raise Rejected('SKILL file does not match the frozen study manifest')
     # Trusted host code itself is never copied into the candidate tree.
     script = Path(repair_step.__file__).read_text(encoding='utf-8')
     for step in range(1, args.max_steps + 1):
