@@ -1,6 +1,6 @@
 # KOTZE Phase 2.5 — Single-Gemma bounded repair loop (Python vertical slice)
 
-**Status:** Draft implementation, not merged or deployed. Nine local synthetic sandbox-step checks passed on the earlier recorded blob c02b9ff053449e84e02a2d83db40cfde4a21e045. The subsequent source-scope, study-provenance and root-owned-source improvements are committed with additional regression tests, but the revised branch has **not** undergone a full local test run or genuine Linux Bubblewrap acceptance in this session. The previous nine checks must not be misrepresented as a clean run of this final revision. No live model, paid API, CI or deployment was invoked.
+**Status:** Draft implementation, not merged or deployed. The current tools/repair_step.py blob e7430cb194011dbf5e66b66cd2f1a9e7c952babf passed **9/9** local synthetic subprocess/unit checks. Three additional direct negative probes on the same current blob denied nested tests/helpers.py, sitecustomize.py and usercustomize.py edits. The broader orchestration, source-scope, study-provenance and root-owned-source improvements are committed with regression tests, but the revised branch has **not** undergone a full local test run or genuine Linux Bubblewrap acceptance in this session. These step-only checks must not be misrepresented as a complete repair-system pass. No live model, paid API, CI or deployment was invoked.
 
 ## Mechanism
 
@@ -33,7 +33,7 @@ For this vertical slice, the trusted manifest task must include source_tree_sha2
 
 ## Reproducibility and limitations
 
-- Nine historical local synthetic subprocess checks passed on the earlier repair_step.py blob c02b9ff053449e84e02a2d83db40cfde4a21e045: correct patch + public unittest, failed unittest, missing tests, duplicate old text, symlink and test-path denial, path traversal, unknown shell fields and isolated Python -I code execution with the edit passed only via stdin. This is NOT a real untrusted Bubblewrap acceptance.
+- Nine local synthetic subprocess/unit checks passed on the current repair_step.py blob e7430cb194011dbf5e66b66cd2f1a9e7c952babf; three additional current-code path negatives were directly executed (nested test helper, sitecustomize, usercustomize): correct patch + public unittest, failed unittest, missing tests, duplicate old text, symlink and test-path denial, path traversal, unknown shell fields and isolated Python -I code execution with the edit passed only via stdin. This is NOT a real untrusted Bubblewrap acceptance.
 - A new test_repair_agent.py contains mocked-model, mocked-worker, native WRITE-reservation stub, exact C11 state binding, CANDIDATE_SEALED transition stub, forged-telemetry rejection and edit-scope tests. A complete suite against a full checkout was not executed here. These mocks do not prove a native end-to-end repair.
 - Python-only, one existing source file per iteration. No general JavaScript, PHP, C, pytest, multi-file AST edits, package installation, network/GUI repair, or guaranteed autonomous solution.
 - Worker-controlled public test results can be manipulated, even if edited test files are blocked at publication. They are NEVER grader receipts or proofs of patch correctness.
