@@ -223,7 +223,8 @@ def worker_command(bwrap: str, workspace: Path, argv: list[str]) -> list[str]:
 def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
                source: Path, expected_source_sha256: str, scratch: Path,
                publish_parent: Path, output_name: str, argv: list[str],
-               worker_uid: int, worker_gid: int, timeout: int = 120) -> dict:
+               worker_uid: int, worker_gid: int, timeout: int = 120,
+               capture_report: bool = False) -> dict:
     if os.name != 'posix' or sys.platform != 'linux':
         raise Refused('Linux namespace sandbox required')
     bwrap = trusted_bwrap_path()
@@ -288,6 +289,13 @@ def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
             raise Refused('Worker process or sandbox failed to start') from exc
         if status != 0:
             raise Refused(f'Worker exited {status}; no candidate published')
+        # Optional bounded, explicitly UNTRUSTED step telemetry; it is never a
+        # verifier receipt or an authority claim. Reject oversized output.
+        report = None
+        if capture_report:
+            if stdout.stat().st_size > 12288:
+                raise Refused('Worker telemetry exceeded hard output limit')
+            report = stdout.read_bytes().decode('utf-8', 'replace')
         strip_protected(workspace, excluded)
         candidate_sha = digest_tree(workspace)
         # Cross-device safe: stage in the publication parent, then atomically rename.
@@ -300,13 +308,16 @@ def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
             if output.exists() or output.is_symlink():
                 raise Refused('Output was created concurrently')
             publish_noreplace(final, publish_parent, output_name)
-        return {'schema': SCHEMA, 'study_id': study.get('study_id'),
+        outcome = {'schema': SCHEMA, 'study_id': study.get('study_id'),
                 'task_id': task_id, 'arm': arm, 'base_sha': task.get('base_sha'),
                 'manifest_sha256': manifest_sha, 'input_tree_sha256': source_sha,
                 'candidate_tree_sha256': candidate_sha, 'output': str(output),
                 'worker_host_uid': worker_uid, 'worker_host_gid': worker_gid,
                 'worker_exit_code': status, 'worker_elapsed_seconds': round(time.monotonic()-start, 6),
                 'verified': False, 'oracle_mounted': False}
+        if capture_report:
+            outcome['worker_report_untrusted'] = report
+        return outcome
 
 
 def main() -> int:
@@ -318,6 +329,8 @@ def main() -> int:
     p.add_argument('--worker-uid', type=int, required=True)
     p.add_argument('--worker-gid', type=int, required=True)
     p.add_argument('--timeout', type=int, default=120)
+    p.add_argument('--capture-report', action='store_true',
+                   help='return bounded untrusted worker stdout, never a receipt')
     p.add_argument('argv', nargs=argparse.REMAINDER)
     a = vars(p.parse_args())
     a['argv'] = a['argv'][1:] if a['argv'][:1] == ['--'] else a['argv']
