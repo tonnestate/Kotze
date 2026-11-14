@@ -3,6 +3,8 @@ import json
 from contextlib import contextmanager
 import os
 from pathlib import Path
+import tempfile
+import threading
 import socket
 import sys
 import types
@@ -11,6 +13,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 import verifier_service as v
+import verifier_client as client
 
 
 @contextmanager
@@ -107,6 +110,33 @@ class IPCContractTests(unittest.TestCase):
             self.assertNotEqual(first, v._event_id('work', 'task', 'SKILL', {'state': 'FAIL'}))
             self.assertNotEqual(first, v._event_id('another-work', 'task', 'SKILL', {'state': 'PASS'}))
             self.assertTrue(first.startswith('verify-'))
+
+    def test_client_roundtrip_to_real_local_socket(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / 'verify.sock'
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+                listener.bind(str(path))
+                listener.listen(1)
+                errors = []
+                def server():
+                    try:
+                        with listener.accept()[0] as peer:
+                            v.handle_connection(peer, self.c, lambda *_: {'state': 'COMPLETED', 'revision': 6})
+                    except Exception as exc:
+                        errors.append(exc)
+                t = threading.Thread(target=server)
+                t.start()
+                try:
+                    result = client.request(path, 'work-1', 'task-1', 'SKILL')
+                    self.assertEqual((result['state'], result['revision']), ('COMPLETED', 6))
+                finally:
+                    t.join(timeout=3)
+                self.assertFalse(errors)
+                self.assertFalse(t.is_alive())
+
+    def test_client_refuses_path_traversal(self):
+        with self.assertRaisesRegex(ValueError, 'identity'):
+            client.request(Path('/tmp/verified.sock'), '../trusted', 'task', 'SKILL')
 
     def test_refuse_same_worker_and_verifier_identity(self):
         c = v.Config(**{**self.c.__dict__, 'worker_uid': 65534, 'verifier_uid': 65534, 'verifier_gid': 65534})
