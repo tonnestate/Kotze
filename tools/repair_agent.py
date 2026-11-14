@@ -133,6 +133,54 @@ def inspect(root: Path, name: str, excluded: set[Path]) -> str:
         raise Rejected('Source file is not UTF-8') from exc
 
 
+def inspect_range(root: Path, name: str, excluded: set[Path],
+                  start_line: int, max_lines: int) -> str:
+    """Read a host-pinned, descriptor-validated line range, not a full large file.
+
+    A bounded range is untrusted context, NEVER a verifier receipt. This does
+    not relax the existing one-file edit scope, public-test or oracle boundary.
+    """
+    if (type(start_line) is not int or type(max_lines) is not int
+            or not 1 <= start_line <= 50000 or not 1 <= max_lines <= 120):
+        raise Rejected('Invalid bounded source range')
+    fd = _open_visible(root, name, excluded)
+    try:
+        before = os.fstat(fd)
+        # Even a late line request has a hard bound on bytes that can be scanned.
+        if before.st_size > min(hc.MAX_FILE_BYTES, 2 * 1024 * 1024):
+            raise Rejected('Source too large for bounded line navigation')
+        result = []
+        used = 0
+        try:
+            with os.fdopen(os.dup(fd), 'rb') as stream:
+                for number, raw_line in enumerate(stream, 1):
+                    if number < start_line:
+                        continue
+                    if number >= start_line + max_lines:
+                        break
+                    rendered = f'{number}: ' + raw_line.rstrip(b'\r\n').decode('utf-8', 'strict') + '\n'
+                    length = len(rendered.encode('utf-8'))
+                    if used + length > MAX_INSPECT_BYTES:
+                        if not result:
+                            raise Rejected('Single source line exceeds bounded context')
+                        break
+                    result.append(rendered)
+                    used += length
+        except UnicodeDecodeError as exc:
+            raise Rejected('Source range is not UTF-8') from exc
+        after = os.fstat(fd)
+    finally:
+        os.close(fd)
+    if ((before.st_dev, before.st_ino, before.st_size,
+         before.st_mtime_ns, before.st_ctime_ns) !=
+        (after.st_dev, after.st_ino, after.st_size,
+         after.st_mtime_ns, after.st_ctime_ns)):
+        raise Rejected('Source changed during bounded line inspection')
+    if not result:
+        raise Rejected('Requested source range is beyond end of file')
+    return ''.join(result)
+
+
 def source_sha256(root: Path, name: str, excluded: set[Path]) -> str:
     """Hash one validated source inode, independently of worker telemetry."""
     fd = _open_visible(root, name, excluded)
@@ -197,6 +245,12 @@ def parse_action(proposal: str) -> dict:
     if op == 'inspect' and set(action) == {'schema', 'action', 'path'}:
         if type(action['path']) is not str:
             raise Rejected('Invalid inspect path')
+    elif op == 'inspect_range' and set(action) == {'schema', 'action', 'path', 'start_line', 'max_lines'}:
+        if (type(action['path']) is not str or type(action['start_line']) is not int
+                or type(action['max_lines']) is not int
+                or not 1 <= action['start_line'] <= 50000
+                or not 1 <= action['max_lines'] <= 120):
+            raise Rejected('Invalid bounded inspection arguments')
     elif op == 'edit_test' and set(action) == {'schema', 'action', 'path', 'old', 'new'}:
         if (any(type(action.get(k)) is not str for k in ('path', 'old', 'new'))
                 or not action['old'] or action['old'] == action['new']
@@ -218,6 +272,8 @@ def prompt(*, filenames: list[str], observations: list[str], candidate_sha: str,
         'JSON object, no markdown and no claims that your code is verified. '
         'Available operations:\n'
         '{"schema":"kotze.repair-action.v1","action":"inspect","path":"src/calc.py"}\n'
+        '{"schema":"kotze.repair-action.v1","action":"inspect_range",'
+        '"path":"src/calc.py","start_line":1,"max_lines":80}\n'
         '{"schema":"kotze.repair-action.v1","action":"edit_test","path":"src/calc.py",'
         '"old":"one EXACT unique source substring","new":"replacement"}\n'
         '{"schema":"kotze.repair-action.v1","action":"submit"}\n'
@@ -518,6 +574,8 @@ def run(args: argparse.Namespace) -> dict:
         raise Rejected('SKILL arm requires a pinned skill file')
     seen = set()
     inspected = set()
+    indexed_source_sha = None
+    indexed_filenames = None
     observations = ['No source file inspected yet. Select an inspect action.']
     had_edit = False
     last_test_pass = False
@@ -548,7 +606,12 @@ def run(args: argparse.Namespace) -> dict:
         t0 = clock()
         if hc.digest_tree(current) != source_sha:
             raise Rejected('Pinned candidate tree changed between steps')
-        files = file_index(current, hidden, validated=True)
+        # Identity is checked above on every step. Reindex only after a new
+        # host-sealed candidate SHA, not after repeated reads of the same tree.
+        if indexed_source_sha != source_sha:
+            indexed_filenames = file_index(current, hidden, validated=True)
+            indexed_source_sha = source_sha
+        files = indexed_filenames
         metrics['host_digest_seconds'] += clock() - t0
         model_text = prompt(filenames=files, observations=observations,
                             candidate_sha=source_sha, candidate_ready=had_edit and last_test_pass)
@@ -577,9 +640,13 @@ def run(args: argparse.Namespace) -> dict:
             reject(step, 'Repeated action on identical pinned source')
             continue
         seen.add(fingerprint)
-        if action['action'] == 'inspect':
+        if action['action'] in ('inspect', 'inspect_range'):
             try:
-                source = inspect(current, action['path'], hidden)
+                if action['action'] == 'inspect_range':
+                    source = inspect_range(current, action['path'], hidden,
+                                           action['start_line'], action['max_lines'])
+                else:
+                    source = inspect(current, action['path'], hidden)
             except Rejected as exc:
                 reject(step, 'Inspect refused: ' + str(exc), path=action['path'][:240])
                 continue
@@ -588,7 +655,7 @@ def run(args: argparse.Namespace) -> dict:
             finish_action(args, read_id, 'READ:' + gm.digest(source))
             inspected.add(action['path'])
             observations.append('INSPECT ' + action['path'] + ' (UNTRUSTED SOURCE):\n' + source)
-            trail.append({'step': step, 'action': 'inspect', 'path': action['path'],
+            trail.append({'step': step, 'action': action['action'], 'path': action['path'],
                           'snapshot_sha256': source_sha, 'c11_action': read_id})
             continue
         if action['action'] == 'submit':
