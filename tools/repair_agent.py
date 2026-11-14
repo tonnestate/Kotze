@@ -319,6 +319,17 @@ def preflight(args: argparse.Namespace) -> None:
     if (args.db.is_symlink() or not args.db.is_file()
             or not hc.within(args.db.resolve(strict=True), trusted)):
         raise Rejected('C11 database must be inside trusted root')
+    if args.arm == 'BASE' and args.skill_file is not None:
+        raise Rejected('BASE arm must not load a skill')
+    if args.arm == 'SKILL':
+        skill = args.skill_file
+        if (skill is None or skill.is_symlink() or not skill.is_file()
+                or not hc.within(skill.resolve(strict=True), trusted)):
+            raise Rejected('SKILL requires a private trusted-root skill')
+        st_skill = skill.stat()
+        if (st_skill.st_uid != 0 or st_skill.st_mode & 0o077
+                or st_skill.st_nlink != 1 or st_skill.st_size > gm.PROMPT_LIMIT):
+            raise Rejected('Skill must be a small private root-owned regular file')
     for protected_file in (args.db, args.manifest):
         file_stat = protected_file.stat()
         if file_stat.st_uid != 0 or file_stat.st_mode & 0o022:
@@ -356,6 +367,17 @@ def run(args: argparse.Namespace) -> dict:
     _, task, _, hidden = hc.protected_paths(args.manifest, args.task_id)
     current = args.source
     initial_sha = hc.digest_tree(current)
+    # A C11 base_sha is an opaque baseline/commit identifier and need not be
+    # the exact secure_snapshot tree digest. Bind BOTH independently.
+    pinned_tree = task.get('source_tree_sha256') if isinstance(task, dict) else None
+    if (type(pinned_tree) is not str
+            or not re.fullmatch(r'[0-9a-f]{64}', pinned_tree)
+            or pinned_tree != initial_sha):
+        raise Rejected('Current source does not match host-pinned baseline tree')
+    if args.arm == 'BASE' and args.skill_file is not None:
+        raise Rejected('BASE arm cannot load an experimental skill')
+    if args.arm == 'SKILL' and args.skill_file is None:
+        raise Rejected('SKILL arm requires a pinned skill file')
     seen = set()
     inspected = set()
     observations = ['No source file inspected yet. Select an inspect action.']
@@ -363,10 +385,18 @@ def run(args: argparse.Namespace) -> dict:
     last_test_pass = False
     last_candidate = None
     trail = []
+    skill_digest = None
+    if args.skill_file is not None:
+        # Pin content across all model turns, not only the filename. Worker
+        # observations cannot replace or tune a skill during a paired study.
+        skill_digest = gm.digest(gm.read_prompt(args.skill_file))
     # Trusted host code itself is never copied into the candidate tree.
     script = Path(repair_step.__file__).read_text(encoding='utf-8')
     for step in range(1, args.max_steps + 1):
         work_revision = validate_work_identity(args.db, args.work_id, task)
+        if (skill_digest is not None
+                and gm.digest(gm.read_prompt(args.skill_file)) != skill_digest):
+            raise Rejected('Skill changed during pinned evaluation')
         source_sha = hc.digest_tree(current)
         files = file_index(current, hidden)
         model_text = prompt(filenames=files, observations=observations,
