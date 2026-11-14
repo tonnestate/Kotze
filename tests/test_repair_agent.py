@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -125,6 +126,51 @@ class HostEditScopeTests(unittest.TestCase):
                                   {Path('tests/test_calc.py')}, 'tests/test_calc.py')
 
 
+class WorkIdentityTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.db = Path(self.temp.name) / 'control.sqlite'
+        self.task = {'base_sha': 'baseline', 'oracle_sha256': 'private-oracle-hash'}
+        with sqlite3.connect(self.db) as conn:
+            conn.execute('CREATE TABLE works(id TEXT,state TEXT,mode TEXT,base_sha TEXT,oracle_hash TEXT)')
+            conn.execute("INSERT INTO works VALUES('w','REPAIRING','AUTO','baseline','private-oracle-hash')")
+
+    def test_exact_repair_work_identity(self):
+        agent.validate_work_identity(self.db, 'w', self.task)
+
+    def test_mismatched_source_and_oracle_denied(self):
+        for row in ({'base_sha': 'wrong', 'oracle_sha256': 'private-oracle-hash'},
+                    {'base_sha': 'baseline', 'oracle_sha256': 'wrong'}):
+            with self.assertRaisesRegex(agent.Rejected, 'not bound'):
+                agent.validate_work_identity(self.db, 'w', row)
+
+    def test_nonrepair_state_and_nonauto_mode_denied(self):
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("UPDATE works SET state='VERIFYING' WHERE id='w'")
+        with self.assertRaisesRegex(agent.Rejected, 'AUTO REPAIRING'):
+            agent.validate_work_identity(self.db, 'w', self.task)
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("UPDATE works SET state='REPAIRING',mode='PLAN' WHERE id='w'")
+        with self.assertRaisesRegex(agent.Rejected, 'AUTO REPAIRING'):
+            agent.validate_work_identity(self.db, 'w', self.task)
+
+    def test_write_reservation_is_native_write_not_model(self):
+        args = Namespace(core_bin=Path('/host/core'), db=self.db, work_id='w',
+                         worker_uid=65534, worker_gid=65534, event_prefix='test')
+        with patch.object(agent.subprocess, 'run') as runner:
+            runner.return_value.returncode = 0
+            runner.return_value.stdout = 'OK: transaction committed'
+            result = agent.reserve_write(args, 2, 'fingerprint', 'source')
+            self.assertEqual(result, 'test-write-002')
+            self.assertEqual(runner.call_args.args[0][5], 'WRITE')
+        with patch.object(agent.subprocess, 'run') as runner:
+            runner.return_value.returncode = 0
+            runner.return_value.stdout = 'REPEAT_BLOCKED: identical context'
+            with self.assertRaisesRegex(agent.Rejected, 'refused'):
+                agent.reserve_write(args, 2, 'fingerprint', 'source')
+
+
 class AgentLoopTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -156,6 +202,15 @@ class AgentLoopTests(unittest.TestCase):
         self.preflight_patch = patch.object(agent, 'preflight', return_value=None)
         self.preflight_patch.start()
         self.addCleanup(self.preflight_patch.stop)
+        self.identity_patch = patch.object(agent, 'validate_work_identity', return_value=None)
+        self.identity_patch.start()
+        self.addCleanup(self.identity_patch.stop)
+        self.reserve_patch = patch.object(agent, 'reserve_write', return_value='synthetic-write')
+        self.reserve_patch.start()
+        self.addCleanup(self.reserve_patch.stop)
+        self.finish_patch = patch.object(agent, 'finish_write', return_value=None)
+        self.finish_patch.start()
+        self.addCleanup(self.finish_patch.stop)
 
     @staticmethod
     def message(op, **data):
