@@ -56,3 +56,7 @@ Full interfaces, state transitions, recovery boundaries, donor decisions, and ac
 ## Phase 2.4: OS-authenticated verifier admission
 
 The draft [verifier IPC service](docs/VERIFIER_IPC.md) uses Linux SO_PEERCRED on a private Unix socket to admit only an explicitly configured verifier UID/GID. The worker cannot supply files, an oracle, receipt content, verifier actor, C11 event ID or decision. The trusted service revalidates the host-private receipt and delegates to the existing C11 bridge. Local contract tests and a synthetic real-UID socket denial passed; full native C11 end-to-end testing and live Bubblewrap acceptance remain open. This is not deployed or merged.
+
+## Phase 2.5: Host-mediated Gemma repair vertical slice
+
+The draft [single-agent repair loop](docs/SINGLE_AGENT_REPAIR_LOOP.md) connects the existing C11-journaled Gemma model adapter to typed inspect/edit/test/submit actions and the existing Linux host-worker sandbox. Only one explicitly inspected Python source path can change per edit, enforced by an independent descriptor-based host comparison; public unittest feedback is explicitly untrusted. A successful loop publishes only an UNVERIFIED_CANDIDATE_READY snapshot for the confidential grader. Nine local exact-code sandbox-step tests passed; full model/host/independent grader integration, live Bubblewrap and independent repair-rate benchmarking remain open. Not merged, deployed, or submitted to Kaggle.
