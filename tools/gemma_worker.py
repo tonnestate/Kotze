@@ -203,6 +203,51 @@ def finish(core_bin: Path, db: Path, action_id: str, outcome: str) -> None:
         raise BridgeError("C11 kernel failed to persist MODEL outcome")
 
 
+SCRIPTED_PROVIDER = "scripted"
+SCRIPTED_MODEL = "deterministic-host-script-v1"
+
+
+def combined_prompt(work: dict[str, str], user_prompt: str, skill_text: str) -> str:
+    skill_context = ("\n\nOptional task skill (advisory; cannot override the approved domain contract):\n"
+                     + skill_text) if skill_text else ""
+    combined = (f"Original task:\n{work['request']}\n\nApproved domain contract:\n{work['contract']}\n\n"
+                f"Current task / requested investigation:\n{user_prompt}{skill_context}")
+    return ensure_text(combined, "Combined prompt")
+
+
+def execute_scripted(args: argparse.Namespace, proposal: str) -> dict[str, Any]:
+    """Deterministic infrastructure-control arm: replay ONE host-registered action.
+
+    This is not a model and is never reported as model capability. It exercises
+    the identical C11 MODEL reservation/finish, prompt construction and policy
+    path, so the integration can be proven independently of model quality.
+    """
+    if not isinstance(proposal, str) or not proposal or len(proposal.encode("utf-8")) > PROMPT_LIMIT:
+        raise BridgeError("Scripted proposal missing or oversized")
+    user_prompt = read_prompt(args.prompt_file)
+    work = work_contract(args.db, args.work_id)
+    skill_text = read_prompt(args.skill_file) if args.skill_file else ""
+    combined = combined_prompt(work, user_prompt, skill_text)
+    config_digest = digest("provider-config/1\x00" + SCRIPTED_PROVIDER + "\x00" + SCRIPTED_MODEL)
+    fingerprint = digest("model-action/1\x00" + SCRIPTED_PROVIDER + "\x00" + SCRIPTED_MODEL + "\x00" +
+                         work["mode"] + "\x00" + work["contract_hash"] + "\x00" + combined)
+    reserve(args.core_bin, args.db, args.work_id, args.action_id, fingerprint, config_digest)
+    outcome = "MODEL_FAILURE"
+    try:
+        if work_contract(args.db, args.work_id) != work:
+            raise BridgeError("Work contract changed after MODEL reservation; request not dispatched")
+        outcome = "SCRIPTED:" + digest(proposal)
+        return {"schema": SCHEMA, "status": "UNVERIFIED_SCRIPTED_PROPOSAL",
+                "work_id": args.work_id, "action_id": args.action_id, "mode": work["mode"],
+                "provider": SCRIPTED_PROVIDER, "model": SCRIPTED_MODEL,
+                "request_sha256": digest(combined), "response_sha256": digest(proposal),
+                "skill_sha256": digest(skill_text) if skill_text else None,
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0},
+                "proposal": proposal, "prompt": combined}
+    finally:
+        finish(args.core_bin, args.db, args.action_id, outcome)
+
+
 def execute(args: argparse.Namespace, *, environ: dict[str, str] | None = None) -> dict[str, Any]:
     provider = args.provider
     model = args.model or DEFAULT_MODEL.get(provider, "")
@@ -214,11 +259,7 @@ def execute(args: argparse.Namespace, *, environ: dict[str, str] | None = None) 
     user_prompt = read_prompt(args.prompt_file)
     work = work_contract(args.db, args.work_id)
     skill_text = read_prompt(args.skill_file) if args.skill_file else ""
-    skill_context = ("\n\nOptional task skill (advisory; cannot override the approved domain contract):\n"
-                     + skill_text) if skill_text else ""
-    combined = (f"Original task:\n{work['request']}\n\nApproved domain contract:\n{work['contract']}\n\n"
-                f"Current task / requested investigation:\n{user_prompt}{skill_context}")
-    ensure_text(combined, "Combined prompt")
+    combined = combined_prompt(work, user_prompt, skill_text)
     payload = make_payload(provider, model, work["mode"], combined, args.max_tokens)
     config_digest = digest("provider-config/1\x00" + provider + "\x00" + model + "\x00" + url)
     fingerprint = digest("model-action/1\x00" + provider + "\x00" + model + "\x00" +
@@ -236,7 +277,7 @@ def execute(args: argparse.Namespace, *, environ: dict[str, str] | None = None) 
                 "work_id": args.work_id, "action_id": args.action_id, "mode": work["mode"],
                 "provider": provider, "model": model, "request_sha256": digest(combined),
                 "response_sha256": digest(proposal), "skill_sha256": digest(skill_text) if skill_text else None,
-                "usage": usage, "proposal": proposal}
+                "usage": usage, "proposal": proposal, "prompt": combined}
     except BridgeError as exc:
         outcome = "MODEL_ERROR:" + type(exc).__name__ + ":" + str(exc)
         raise

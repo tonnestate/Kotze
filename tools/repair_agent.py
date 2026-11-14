@@ -20,6 +20,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 
 def _trusted_tool_imports() -> None:
     """No writable plugin directory may be imported by a root host controller."""
@@ -59,6 +60,12 @@ ALLOWED_SUFFIX = {'.py'}
 
 class Rejected(Exception):
     pass
+
+
+class StepRejected(Rejected):
+    """A model-caused, candidate-local refusal. Nothing was published or
+    admitted; the loop reports the reason as untrusted feedback and continues
+    within its C11-journaled step budget. Host/C11/identity failures stay fatal."""
 
 
 def _under(rel: Path, excluded: set[Path]) -> bool:
@@ -150,8 +157,11 @@ def source_sha256(root: Path, name: str, excluded: set[Path]) -> str:
         os.close(fd)
 
 
-def file_index(root: Path, excluded: set[Path]) -> list[str]:
-    hc.digest_tree(root)  # descriptor anchored; rejects unsafe tree entries
+def file_index(root: Path, excluded: set[Path], *, validated: bool = False) -> list[str]:
+    # Descriptor-anchored validation rejects unsafe entries. Callers that hashed
+    # the identical pinned tree immediately before may skip the second pass.
+    if not validated:
+        hc.digest_tree(root)
     names: list[str] = []
     for path in sorted(root.rglob('*.py')):
         rel = path.relative_to(root)
@@ -237,7 +247,45 @@ def _model(args: argparse.Namespace, step: int, text: str) -> dict:
             max_tokens=args.max_tokens, db=args.db, work_id=args.work_id,
             action_id=f'{args.event_prefix}-model-{step:03d}', core_bin=args.core_bin,
             prompt_file=file, skill_file=args.skill_file)
+        if args.provider == gm.SCRIPTED_PROVIDER:
+            script = getattr(args, 'script', None)
+            if not isinstance(script, list) or not 1 <= step <= len(script):
+                raise Rejected('Deterministic host script has no action for this step')
+            return gm.execute_scripted(request, script[step - 1])
         return gm.execute(request)
+
+
+def load_script(path: Path | None, trusted: Path) -> list[str]:
+    """Host-private deterministic action list for the infrastructure-control arm."""
+    if path is None:
+        raise Rejected('Scripted provider requires --script-file')
+    if (path.is_symlink() or not path.is_file()
+            or not hc.within(path.resolve(strict=True), trusted)):
+        raise Rejected('Deterministic script must be a host-private trusted file')
+    info = path.stat()
+    if info.st_uid != os.geteuid() or info.st_mode & 0o077 or info.st_size > gm.PROMPT_LIMIT:
+        raise Rejected('Deterministic script must be small, private and host-owned')
+    data = json.loads(path.read_text(encoding='utf-8'))
+    if (not isinstance(data, list) or not data or len(data) > MAX_STEPS
+            or not all(isinstance(item, dict) for item in data)):
+        raise Rejected('Deterministic script must be a list of action objects')
+    return [json.dumps(item, separators=(',', ':'), ensure_ascii=True) for item in data]
+
+
+def _record(args: argparse.Namespace, step: int, prompt_text: str, response: dict) -> None:
+    """Host-private transcript, used for audit and hidden-oracle leak scanning."""
+    directory = getattr(args, 'transcript_dir', None)
+    if directory is None:
+        return
+    record = {'step': step, 'provider': response.get('provider'), 'model': response.get('model'),
+              'request_sha256': response.get('request_sha256'),
+              'response_sha256': response.get('response_sha256'),
+              'usage': response.get('usage'), 'prompt': response.get('prompt', prompt_text),
+              'proposal': response.get('proposal')}
+    target = directory / f'step-{step:03d}.json'
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    with os.fdopen(fd, 'w', encoding='utf-8') as out:
+        json.dump(record, out, sort_keys=True, ensure_ascii=True)
 
 
 def validate_work_identity(db: Path, work_id: str, task: dict) -> int:
@@ -265,35 +313,47 @@ def validate_work_identity(db: Path, work_id: str, task: dict) -> int:
     return revision
 
 
-def reserve_write(args: argparse.Namespace, step: int, fingerprint: str,
-                  source_sha: str) -> str:
-    """Reserve an actual C11 WRITE side effect (not merely a MODEL proposal)."""
-    action_id = f'{args.event_prefix}-write-{step:03d}'
-    environment = gm.digest('kotze-write-env-v1/' + str(args.worker_uid) + '/'
+def reserve_action(args: argparse.Namespace, operation: str, step: int,
+                   fingerprint: str) -> str:
+    """Reserve one journaled C11 READ/TEST/WRITE intent before it executes."""
+    if operation not in ('READ', 'TEST', 'WRITE'):
+        raise Rejected('Unsupported host action class')
+    action_id = f'{args.event_prefix}-{operation.lower()}-{step:03d}'
+    environment = gm.digest(f'kotze-{operation.lower()}-env-v1/' + str(args.worker_uid) + '/'
                             + str(args.worker_gid) + '/bubblewrap/no-network')
     cmd = [str(args.core_bin), str(args.db), 'action-reserve', args.work_id,
-           action_id, 'WRITE', fingerprint, environment, '0']
+           action_id, operation, fingerprint, environment, '0']
     try:
         result = subprocess.run(cmd, capture_output=True, text=True,
                                 check=False, timeout=15)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise Rejected('Native WRITE reservation unavailable') from exc
+        raise Rejected(f'Native {operation} reservation unavailable') from exc
     if (result.returncode or 'OK: transaction committed' not in result.stdout
             or 'REPEAT' in result.stdout or 'REPLAY' in result.stdout):
-        raise Rejected('C11 refused untrusted edit WRITE reservation')
+        raise Rejected(f'C11 refused untrusted {operation} reservation')
     return action_id
 
 
-def finish_write(args: argparse.Namespace, action_id: str, status: str) -> None:
+def finish_action(args: argparse.Namespace, action_id: str, status: str) -> None:
     cmd = [str(args.core_bin), str(args.db), 'action-finish', action_id,
            gm.digest(status)]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True,
                                 check=False, timeout=15)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise Rejected('Native WRITE completion unavailable') from exc
+        raise Rejected('Native action completion unavailable') from exc
     if result.returncode or 'OK: transaction committed' not in result.stdout:
-        raise Rejected('C11 refused WRITE completion; candidate is not admitted')
+        raise Rejected('C11 refused action completion; candidate is not admitted')
+
+
+def reserve_write(args: argparse.Namespace, step: int, fingerprint: str,
+                  source_sha: str) -> str:
+    """Reserve an actual C11 WRITE side effect (not merely a MODEL proposal)."""
+    return reserve_action(args, 'WRITE', step, fingerprint)
+
+
+def finish_write(args: argparse.Namespace, action_id: str, status: str) -> None:
+    finish_action(args, action_id, status)
 
 
 def seal_candidate(args: argparse.Namespace, task: dict, expected_revision: int,
@@ -389,12 +449,39 @@ def preflight(args: argparse.Namespace) -> None:
                         (source, published), (scratch, published)):
         if hc.within(left, right) or hc.within(right, left):
             raise Rejected('Trusted and worker path roots may not overlap')
+    transcript = getattr(args, 'transcript_dir', None)
+    if transcript is not None:
+        resolved_transcript = hc.strict_dir(transcript, private=True)
+        if transcript != resolved_transcript or not hc.within(resolved_transcript, trusted):
+            raise Rejected('Transcript directory must be a private directory inside the trusted root')
     hc.require_worker_identity(args.worker_uid, args.worker_gid)
     hc.trusted_bwrap_path()  # no paid/model request before isolation runtime admission
     _, task, _, _ = hc.protected_paths(args.manifest, args.task_id)
     if task.get('case_protocol') != 'host-oracle-stdin-v1':
         raise Rejected('Only host-private stdin/out verification studies admitted')
     validate_work_identity(args.db, args.work_id, task)
+
+
+def _worker_runtime_still_admitted(args: argparse.Namespace) -> None:
+    """Distinguish candidate-caused refusals from a degraded host runtime."""
+    try:
+        hc.trusted_bwrap_path()
+        hc.require_worker_identity(args.worker_uid, args.worker_gid)
+    except hc.Refused as exc:
+        raise Rejected('Isolation runtime no longer admitted: ' + str(exc)) from exc
+
+
+def _untrusted_diagnostic(text: object) -> str:
+    """Bounded, printable worker diagnostic for the model; never authoritative."""
+    if not isinstance(text, str):
+        return ''
+    try:
+        report = json.loads(text)
+        if isinstance(report, dict):
+            text = f"{report.get('status')}: {report.get('diagnostic', '')}"
+    except ValueError:
+        pass
+    return ''.join(c if c.isprintable() or c == '\n' else '?' for c in text)[:2000]
 
 
 def run(args: argparse.Namespace) -> dict:
@@ -404,10 +491,20 @@ def run(args: argparse.Namespace) -> dict:
             or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,70}', args.event_prefix)):
         raise Rejected('Invalid loop policy')
     preflight(args)
+    if args.provider == gm.SCRIPTED_PROVIDER:
+        args.script = load_script(getattr(args, 'script_file', None), args.trusted)
     # Existing role, manifest and protected path checks are enforced by host_controller.
     study, task, _, hidden = hc.protected_paths(args.manifest, args.task_id)
     current = args.source
+    clock = time.monotonic
+    started = clock()
+    metrics = {'model_calls': 0, 'model_seconds': 0.0, 'worker_runs': 0,
+               'worker_seconds': 0.0, 'host_digest_seconds': 0.0,
+               'c11_action_reservations': 0, 'rejected_steps': 0,
+               'prompt_bytes_total': 0, 'prompt_tokens': 0, 'completion_tokens': 0}
+    t0 = clock()
     initial_sha = hc.digest_tree(current)
+    metrics['host_digest_seconds'] += clock() - t0
     # A C11 base_sha is an opaque baseline/commit identifier and need not be
     # the exact secure_snapshot tree digest. Bind BOTH independently.
     pinned_tree = task.get('source_tree_sha256') if isinstance(task, dict) else None
@@ -436,51 +533,94 @@ def run(args: argparse.Namespace) -> dict:
             raise Rejected('SKILL file does not match the frozen study manifest')
     # Trusted host code itself is never copied into the candidate tree.
     script = Path(repair_step.__file__).read_text(encoding='utf-8')
+    source_sha = initial_sha  # current tree digest, maintained incrementally
+
+    def reject(step: int, reason: str, **extra) -> None:
+        metrics['rejected_steps'] += 1
+        trail.append({'step': step, 'action': 'rejected', 'reason': reason[:300], **extra})
+        observations.append(f'STEP {step} REFUSED BY HOST (nothing applied): {reason[:600]}')
+
     for step in range(1, args.max_steps + 1):
         work_revision = validate_work_identity(args.db, args.work_id, task)
         if (skill_digest is not None
                 and gm.digest(gm.read_prompt(args.skill_file)) != skill_digest):
             raise Rejected('Skill changed during pinned evaluation')
-        source_sha = hc.digest_tree(current)
-        files = file_index(current, hidden)
+        t0 = clock()
+        if hc.digest_tree(current) != source_sha:
+            raise Rejected('Pinned candidate tree changed between steps')
+        files = file_index(current, hidden, validated=True)
+        metrics['host_digest_seconds'] += clock() - t0
         model_text = prompt(filenames=files, observations=observations,
                             candidate_sha=source_sha, candidate_ready=had_edit and last_test_pass)
         if len(model_text.encode('utf-8')) > gm.PROMPT_LIMIT - 20000:
             raise Rejected('Bounded model context exceeded')
+        t0 = clock()
         response = _model(args, step, model_text)
+        metrics['model_seconds'] += clock() - t0
+        metrics['model_calls'] += 1
+        metrics['prompt_bytes_total'] += len(model_text.encode('utf-8'))
+        usage = response.get('usage') if isinstance(response, dict) else None
+        if isinstance(usage, dict):
+            metrics['prompt_tokens'] += int(usage.get('prompt_tokens', 0) or 0)
+            metrics['completion_tokens'] += int(usage.get('completion_tokens', 0) or 0)
+        _record(args, step, model_text, response)
         if validate_work_identity(args.db, args.work_id, task) != work_revision:
             raise Rejected('C11 work changed while model proposed a step')
-        action = parse_action(response['proposal'])
+        try:
+            action = parse_action(response['proposal'])
+        except Rejected as exc:
+            reject(step, 'Invalid action: ' + str(exc))
+            continue
         fingerprint = hashlib.sha256(json.dumps(
             [source_sha, action], sort_keys=True, ensure_ascii=True).encode()).hexdigest()
         if fingerprint in seen:
-            raise Rejected('Repeated action on identical pinned source')
+            reject(step, 'Repeated action on identical pinned source')
+            continue
         seen.add(fingerprint)
         if action['action'] == 'inspect':
-            source = inspect(current, action['path'], hidden)
+            try:
+                source = inspect(current, action['path'], hidden)
+            except Rejected as exc:
+                reject(step, 'Inspect refused: ' + str(exc), path=action['path'][:240])
+                continue
+            read_id = reserve_action(args, 'READ', step, fingerprint)
+            metrics['c11_action_reservations'] += 1
+            finish_action(args, read_id, 'READ:' + gm.digest(source))
             inspected.add(action['path'])
             observations.append('INSPECT ' + action['path'] + ' (UNTRUSTED SOURCE):\n' + source)
             trail.append({'step': step, 'action': 'inspect', 'path': action['path'],
-                          'snapshot_sha256': source_sha})
+                          'snapshot_sha256': source_sha, 'c11_action': read_id})
             continue
         if action['action'] == 'submit':
             if not (had_edit and last_test_pass and last_candidate is not None):
-                raise Rejected('Cannot submit without a changed candidate and passing public tests')
+                reject(step, 'Cannot submit without a changed candidate and passing public tests')
+                continue
             if hc.digest_tree(current) != source_sha:
                 raise Rejected('Candidate changed before submission')
+            sealed = hc.publish_content_addressed(current, args.publish_parent)
             handoff = seal_candidate(args, task, work_revision, source_sha, initial_sha)
+            metrics['total_seconds'] = round(clock() - started, 6)
             return {'schema': RESULT_SCHEMA, 'status': 'UNVERIFIED_CANDIDATE_READY',
                     'work_id': args.work_id, 'task_id': args.task_id, 'arm': args.arm,
+                    'provider': args.provider,
                     'initial_tree_sha256': initial_sha, 'candidate_tree_sha256': source_sha,
-                    'candidate': str(current), 'c11_handoff': handoff,
-                    'verified': False, 'steps': trail}
+                    'candidate': str(sealed), 'c11_handoff': handoff,
+                    'verified': False, 'steps': trail, 'metrics': metrics}
         requested = Path(action['path'])
         if ('tests' in requested.parts or requested.name.startswith('test_')
                 or requested.name in ('conftest.py', 'sitecustomize.py', 'usercustomize.py')):
-            raise Rejected('Test and Python startup-hook sources are not editable')
-        _path(current, action['path'], hidden)
+            reject(step, 'Test and Python startup-hook sources are not editable',
+                   path=action['path'][:240])
+            continue
+        try:
+            _path(current, action['path'], hidden)
+        except Rejected as exc:
+            reject(step, 'Edit target refused: ' + str(exc), path=action['path'][:240])
+            continue
         if action['path'] not in inspected:
-            raise Rejected('An exact source inspection is required before editing')
+            reject(step, 'An exact source inspection is required before editing',
+                   path=action['path'])
+            continue
         original_file_sha = source_sha256(current, action['path'], hidden)
         # The worker executes this exact host-owned source via python -c. The
         # model JSON is data only; it cannot supply a shell/tool command.
@@ -488,24 +628,44 @@ def run(args: argparse.Namespace) -> dict:
         sandbox_action['schema'] = repair_step.SCHEMA
         output_name = f'{args.event_prefix}-step-{step:03d}'
         write_id = reserve_write(args, step, fingerprint, source_sha)
+        test_id = reserve_action(args, 'TEST', step, fingerprint)
+        metrics['c11_action_reservations'] += 2
         worker_outcome = 'WORKER_EXECUTION_FAILED'
+        refusal = None
+        t0 = clock()
         try:
             if validate_work_identity(args.db, args.work_id, task) != work_revision:
                 raise Rejected('C11 work changed after WRITE reservation')
-            stage = hc.run_worker(
-                trusted=args.trusted, manifest=args.manifest, task_id=args.task_id,
-                arm=args.arm, source=current, expected_source_sha256=source_sha,
-                scratch=args.scratch, publish_parent=args.publish_parent,
-                output_name=output_name,
-                argv=['/usr/bin/python3', '-I', '-B', '-c', script],
-                stdin_data=json.dumps(sandbox_action, ensure_ascii=True,
-                                      separators=(',', ':')).encode('utf-8'),
-                worker_uid=args.worker_uid, worker_gid=args.worker_gid,
-                timeout=args.worker_timeout, capture_report=True,
-                allowed_changed_path=action['path'])
-            worker_outcome = 'UNVERIFIED_CANDIDATE:' + stage['candidate_tree_sha256']
+            try:
+                stage = hc.run_worker(
+                    trusted=args.trusted, manifest=args.manifest, task_id=args.task_id,
+                    arm=args.arm, source=current, expected_source_sha256=source_sha,
+                    scratch=args.scratch, publish_parent=args.publish_parent,
+                    output_name=output_name,
+                    argv=['/usr/bin/python3', '-I', '-B', '-c', script],
+                    stdin_data=json.dumps(sandbox_action, ensure_ascii=True,
+                                          separators=(',', ':')).encode('utf-8'),
+                    worker_uid=args.worker_uid, worker_gid=args.worker_gid,
+                    timeout=args.worker_timeout, capture_report=True,
+                    allowed_changed_path=action['path'])
+                worker_outcome = 'UNVERIFIED_CANDIDATE:' + stage['candidate_tree_sha256']
+            except hc.Refused as exc:
+                # Candidate-local refusal (no publication). A degraded runtime is fatal.
+                _worker_runtime_still_admitted(args)
+                refusal = exc
+                worker_outcome = 'STEP_REFUSED:' + str(exc)[:200]
         finally:
+            metrics['worker_seconds'] += clock() - t0
+            metrics['worker_runs'] += 1
             finish_write(args, write_id, worker_outcome)
+            finish_action(args, test_id, worker_outcome)
+        if refusal is not None:
+            reject(step, 'Edit/test step not published: ' + str(refusal)[:200],
+                   path=action['path'], worker_report_untrusted=_untrusted_diagnostic(
+                       getattr(refusal, 'worker_report_untrusted', None)))
+            observations.append('UNTRUSTED WORKER DIAGNOSTIC: ' + _untrusted_diagnostic(
+                getattr(refusal, 'worker_report_untrusted', None)))
+            continue
         try:
             report = json.loads(stage['worker_report_untrusted'])
         except (KeyError, ValueError, TypeError) as exc:
@@ -521,8 +681,10 @@ def run(args: argparse.Namespace) -> dict:
         if validate_work_identity(args.db, args.work_id, task) != work_revision:
             raise Rejected('C11 work changed during sandbox execution; candidate rejected')
         candidate = Path(stage['output'])
+        t0 = clock()
         if hc.digest_tree(candidate) != stage['candidate_tree_sha256']:
             raise Rejected('Published candidate digest did not match host record')
+        metrics['host_digest_seconds'] += clock() - t0
         candidate_file_sha = source_sha256(candidate, action['path'], hidden)
         if (report.get('source_path') != action['path']
                 or report.get('before_sha256') != original_file_sha
@@ -532,6 +694,7 @@ def run(args: argparse.Namespace) -> dict:
         current = candidate
         inspected.clear()  # A changed source requires a fresh model inspection.
         changed = source_sha != stage['candidate_tree_sha256']
+        source_sha = stage['candidate_tree_sha256']
         had_edit = had_edit or changed
         last_candidate = current
         last_test_pass = bool(changed and report['status'] == 'PUBLIC_TESTS_PASS'
@@ -540,15 +703,19 @@ def run(args: argparse.Namespace) -> dict:
         trail.append({'step': step, 'action': 'edit_test', 'path': action['path'],
                       'status': report['status'], 'tree_sha256': stage['candidate_tree_sha256'],
                       'public_test_count': report.get('public_test_count', 0),
+                      'c11_actions': [write_id, test_id],
+                      'worker_elapsed_seconds': stage.get('worker_elapsed_seconds'),
                       'evidence': 'WORKER_SELF_REPORTED_UNTRUSTED'})
         observations.append('EDIT_TEST ' + action['path'] + '\n'
                             + 'UNTRUSTED REPORT: ' + json.dumps(report, ensure_ascii=True)[:6000])
+    metrics['total_seconds'] = round(clock() - started, 6)
     return {'schema': RESULT_SCHEMA, 'status': 'NO_VERIFIED_REPAIR',
             'work_id': args.work_id, 'task_id': args.task_id, 'arm': args.arm,
+            'provider': args.provider,
             'initial_tree_sha256': initial_sha,
-            'candidate_tree_sha256': hc.digest_tree(current),
+            'candidate_tree_sha256': source_sha,
             'candidate': str(current) if had_edit else None,
-            'verified': False, 'steps': trail}
+            'verified': False, 'steps': trail, 'metrics': metrics}
 
 
 def parser() -> argparse.ArgumentParser:
@@ -557,7 +724,11 @@ def parser() -> argparse.ArgumentParser:
         p.add_argument('--' + name.replace('_', '-'), required=True, type=Path)
     for name in ('task_id', 'work_id', 'arm', 'event_prefix'):
         p.add_argument('--' + name.replace('_', '-'), required=True)
-    p.add_argument('--provider', choices=list(gm.MODELS), default='ollama')
+    p.add_argument('--provider', choices=[*gm.MODELS, gm.SCRIPTED_PROVIDER], default='ollama')
+    p.add_argument('--script-file', type=Path, default=None,
+                   help='Host-private deterministic action list (scripted control arm only)')
+    p.add_argument('--transcript-dir', type=Path, default=None,
+                   help='Host-private directory for per-step prompt/response audit records')
     p.add_argument('--model', default=None)
     p.add_argument('--skill-file', type=Path, default=None)
     p.add_argument('--allow-remote', action='store_true')
