@@ -366,6 +366,29 @@ class AgentLoopTests(unittest.TestCase):
                     agent.run(self.args)
                 model.assert_not_called()
 
+    def test_skill_digest_must_match_frozen_manifest(self):
+        skill = self.trusted / 'skill.txt'
+        skill.write_text('Diagnose first; public tests are not receipts.')
+        self.args.arm = 'SKILL'
+        self.args.skill_file = skill
+        mismatch = {'source_tree_sha256': hc.digest_tree(self.source),
+                    'skill_sha256': '0' * 64}
+        with patch.object(agent.hc, 'protected_paths',
+                          return_value=(mismatch, self.study_task, 'synthetic', set())):
+            with patch.object(agent, '_model') as model:
+                with self.assertRaisesRegex(agent.Rejected, 'frozen study'):
+                    agent.run(self.args)
+                model.assert_not_called()
+
+        study = {'skill_sha256': agent.gm.digest(agent.gm.read_prompt(skill))}
+        with patch.object(agent.hc, 'protected_paths',
+                          return_value=(study, self.study_task, 'synthetic', set())):
+            with patch.object(agent, '_model',
+                              return_value={'proposal': self.message('submit')}) as model:
+                with self.assertRaisesRegex(agent.Rejected, 'Cannot submit'):
+                    agent.run(self.args)
+                model.assert_called_once()
+
     def test_model_cannot_submit_without_patch(self):
         with patch.object(agent.hc, 'protected_paths',
                           return_value=({}, self.study_task, 'synthetic', set())):
