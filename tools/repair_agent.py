@@ -126,6 +126,30 @@ def inspect(root: Path, name: str, excluded: set[Path]) -> str:
         raise Rejected('Source file is not UTF-8') from exc
 
 
+def source_sha256(root: Path, name: str, excluded: set[Path]) -> str:
+    """Hash one validated source inode, independently of worker telemetry."""
+    fd = _open_visible(root, name, excluded)
+    try:
+        before = os.fstat(fd)
+        if before.st_size > hc.MAX_FILE_BYTES:
+            raise Rejected('Source file outside bounded digest size')
+        hasher = hashlib.sha256()
+        while True:
+            chunk = os.read(fd, 128 * 1024)
+            if not chunk:
+                break
+            hasher.update(chunk)
+        after = os.fstat(fd)
+        if ((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns,
+             before.st_ctime_ns) !=
+            (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns,
+             after.st_ctime_ns)):
+            raise Rejected('Source changed during independent content hashing')
+        return hasher.hexdigest()
+    finally:
+        os.close(fd)
+
+
 def file_index(root: Path, excluded: set[Path]) -> list[str]:
     hc.digest_tree(root)  # descriptor anchored; rejects unsafe tree entries
     names: list[str] = []
@@ -457,6 +481,7 @@ def run(args: argparse.Namespace) -> dict:
         _path(current, action['path'], hidden)
         if action['path'] not in inspected:
             raise Rejected('An exact source inspection is required before editing')
+        original_file_sha = source_sha256(current, action['path'], hidden)
         # The worker executes this exact host-owned source via python -c. The
         # model JSON is data only; it cannot supply a shell/tool command.
         sandbox_action = dict(action)
@@ -489,16 +514,23 @@ def run(args: argparse.Namespace) -> dict:
                    'after_sha256', 'public_test_count', 'diagnostic'}
         if (not isinstance(report, dict) or not set(report).issubset(allowed)
                 or report.get('schema') != repair_step.SCHEMA
-                or report.get('status') not in ('EDIT_REJECTED', 'NO_PUBLIC_TESTS',
+                or report.get('status') not in ('NO_PUBLIC_TESTS',
                     'PUBLIC_TESTS_PASS', 'PUBLIC_TESTS_FAIL', 'TEST_TIMEOUT')
                 or not isinstance(report.get('diagnostic'), str)):
             raise Rejected('Unexpected untrusted worker telemetry')
         if validate_work_identity(args.db, args.work_id, task) != work_revision:
             raise Rejected('C11 work changed during sandbox execution; candidate rejected')
-        current = Path(stage['output'])
-        inspected.clear()  # A changed source requires a fresh model inspection.
-        if hc.digest_tree(current) != stage['candidate_tree_sha256']:
+        candidate = Path(stage['output'])
+        if hc.digest_tree(candidate) != stage['candidate_tree_sha256']:
             raise Rejected('Published candidate digest did not match host record')
+        candidate_file_sha = source_sha256(candidate, action['path'], hidden)
+        if (report.get('source_path') != action['path']
+                or report.get('before_sha256') != original_file_sha
+                or report.get('after_sha256') != candidate_file_sha
+                or original_file_sha == candidate_file_sha):
+            raise Rejected('Worker-reported edit differs from host-observed source bytes')
+        current = candidate
+        inspected.clear()  # A changed source requires a fresh model inspection.
         changed = source_sha != stage['candidate_tree_sha256']
         had_edit = had_edit or changed
         last_candidate = current
