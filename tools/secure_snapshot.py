@@ -190,3 +190,57 @@ def tree(source: Path, destination: Path | None = None, *,
             os.close(dst_fd)
         if src_fd is not None:
             os.close(src_fd)
+
+def directory_inventory(source: Path, *,
+                        excluded: frozenset[Path] = frozenset()) -> frozenset[Path]:
+    """Descriptor-anchored directory-shape guard.
+
+    The legacy content digest deliberately omits directory entries, including
+    empty directories. A one-file edit must preserve the *entire* allowed
+    directory layout. This independent check changes no existing SHA contract.
+    """
+    rootfd = None
+    directories: set[Path] = set()
+
+    def walk(fd: int, prefix: Path, depth: int) -> None:
+        if depth > MAX_DEPTH or len(directories) > MAX_DIRECTORIES:
+            raise SnapshotError('Directory inventory exceeded bounded policy')
+        start = os.fstat(fd)
+        names = set(os.listdir(fd))
+        if len(names) > MAX_FILES + MAX_DIRECTORIES:
+            raise SnapshotError('Directory entry count exceeded bounded policy')
+        for name in sorted(names):
+            if name == '.git':
+                continue
+            rel = prefix / name
+            if any(rel == p or p in rel.parents for p in excluded):
+                continue
+            before = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            if stat.S_ISDIR(before.st_mode):
+                if len(directories) >= MAX_DIRECTORIES:
+                    raise SnapshotError('Too many directories in inventory')
+                child = os.open(name, DIR_FLAGS, dir_fd=fd)
+                try:
+                    if _identity(os.fstat(child)) != _identity(before):
+                        raise SnapshotError('Directory switched during inventory')
+                    directories.add(rel)
+                    walk(child, rel, depth + 1)
+                    after = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                    if _identity(after) != _identity(before):
+                        raise SnapshotError('Directory changed during inventory')
+                finally:
+                    os.close(child)
+            elif not stat.S_ISREG(before.st_mode):
+                raise SnapshotError('Symlink or special file denied in inventory')
+        if set(os.listdir(fd)) != names or _identity(os.fstat(fd)) != _identity(start):
+            raise SnapshotError('Directory inventory mutated during read')
+
+    try:
+        rootfd = _open_directory(source)
+        walk(rootfd, Path(), 0)
+    except OSError as exc:
+        raise SnapshotError('Directory inventory denied') from exc
+    finally:
+        if rootfd is not None:
+            os.close(rootfd)
+    return frozenset(directories)
