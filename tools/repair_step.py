@@ -21,8 +21,11 @@ SCHEMA = 'kotze.repair-step.v1'
 MAX_EDIT_BYTES = 8192
 MAX_REPORT_BYTES = 4096
 PUBLIC_TEST_TIMEOUT = 45
-TEST_COMMAND = ('/usr/bin/python3', '-B', '-m', 'unittest', 'discover',
-                '-s', 'tests', '-p', 'test_*.py')
+# The host launches this script with its own pinned interpreter; reuse the same
+# canonical file for public tests (``/usr/bin/python3`` may be an /etc link that
+# is not mounted inside the worker namespace).
+TEST_ARGS = ('-B', '-m', 'unittest', 'discover', '-s', 'tests', '-p', 'test_*.py')
+TEST_COMMAND = (sys.executable or '/usr/bin/python3',) + TEST_ARGS
 TEST_COUNT = re.compile(rb'Ran ([0-9]+) tests? in ')
 
 
@@ -139,8 +142,11 @@ def main() -> int:
         action = json.loads(payload.decode('utf-8', 'strict'))
         result = run(action, Path('/work'))
     except (Rejected, OSError, ValueError, TypeError, KeyError) as exc:
+        # Rejected messages are fixed host-authored strings; other exception
+        # texts could echo worker-controlled content and are reduced to a type.
+        detail = str(exc)[:200] if isinstance(exc, Rejected) else type(exc).__name__
         result = {'schema': SCHEMA, 'status': 'EDIT_REJECTED',
-                  'diagnostic': type(exc).__name__}
+                  'diagnostic': detail}
     # Always return a structured, untrusted report. A failed public test is not
     # a verified FAIL; external frozen host-oracle grading is mandatory.
     print(json.dumps(result, ensure_ascii=True, separators=(',', ':')))

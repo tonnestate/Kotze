@@ -61,11 +61,17 @@ def _open_directory(path: Path) -> int:
 
 
 def tree(source: Path, destination: Path | None = None, *,
-         excluded: frozenset[Path] = frozenset(), seal: bool = False) -> str:
+         excluded: frozenset[Path] = frozenset(), seal: bool = False,
+         split: Path | None = None, directories: set[Path] | None = None):
     """Digest and optionally copy an exact stable tree using openat-style dir fds.
 
     Destination must be a newly created, empty, host-owned directory when given.
     A mismatched source mutation refuses, never treats a partially copied tree as valid.
+
+    Single-pass extensions (same digest format, no extra I/O):
+    ``split`` additionally returns the digest of the tree *without* that one
+    file, i.e. ``tree(..., split=p) == (tree(...), tree(..., excluded | {p}))``;
+    ``directories`` collects the same directory set as ``directory_inventory``.
     """
     if seal and destination is None:
         raise SnapshotError('Cannot seal an absent destination')
@@ -80,6 +86,8 @@ def tree(source: Path, destination: Path | None = None, *,
             if dst_stat.st_uid != os.geteuid() or stat.S_IMODE(dst_stat.st_mode) != 0o700:
                 raise SnapshotError('Destination must be private (0700) and host-owned')
         hasher = hashlib.sha256()
+        other = hashlib.sha256() if split is not None else None
+        inventory = directories
         files = total = directories = 0
 
         def recurse(sfd: int, dfd: int | None, prefix: Path) -> None:
@@ -109,6 +117,8 @@ def tree(source: Path, destination: Path | None = None, *,
                     try:
                         if _identity(os.fstat(child)) != _identity(before):
                             raise SnapshotError('Directory switched during open')
+                        if inventory is not None:
+                            inventory.add(rel)
                         target = None
                         if dfd is not None:
                             os.mkdir(name, 0o700, dir_fd=dfd)
@@ -141,15 +151,18 @@ def tree(source: Path, destination: Path | None = None, *,
                         if dfd is not None:
                             out = os.open(name, os.O_CREAT | os.O_EXCL | os.O_WRONLY |
                                           os.O_CLOEXEC | os.O_NOFOLLOW, 0o600, dir_fd=dfd)
-                        hasher.update(str(rel).encode('utf-8'))
-                        hasher.update(b'\x00')
-                        hasher.update(before.st_size.to_bytes(8, 'big'))
+                        sinks = [hasher] if other is None or rel == split else [hasher, other]
+                        for sink in sinks:
+                            sink.update(str(rel).encode('utf-8'))
+                            sink.update(b'\x00')
+                            sink.update(before.st_size.to_bytes(8, 'big'))
                         remaining = before.st_size
                         while remaining:
                             chunk = os.read(fd, min(remaining, CHUNK))
                             if not chunk:
                                 raise SnapshotError('Truncated file during snapshot')
-                            hasher.update(chunk)
+                            for sink in sinks:
+                                sink.update(chunk)
                             if out is not None:
                                 sent = 0
                                 while sent < len(chunk):
@@ -182,6 +195,8 @@ def tree(source: Path, destination: Path | None = None, *,
         if dst_fd is not None and seal:
             os.fchmod(dst_fd, 0o500)
             os.fsync(dst_fd)
+        if other is not None:
+            return hasher.hexdigest(), other.hexdigest()
         return hasher.hexdigest()
     except OSError as exc:
         raise SnapshotError('Descriptor snapshot failed') from exc
