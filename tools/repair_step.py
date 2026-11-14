@@ -36,8 +36,9 @@ def target(root: Path, name: str) -> Path:
     path = PurePosixPath(name)
     if (path.is_absolute() or str(path) != name or not path.parts
             or any(part in ('', '.', '..', '.git', '__pycache__') for part in path.parts)
-            or not name.endswith('.py') or name.startswith('tests/')
-            or path.name.startswith('test_') or path.name in ('conftest.py',)):
+            or not name.endswith('.py') or 'tests' in path.parts
+            or path.name.startswith('test_')
+            or path.name in ('conftest.py', 'sitecustomize.py', 'usercustomize.py')):
         raise Rejected('path outside editable Python source policy')
     cur = root
     for component in path.parts:
