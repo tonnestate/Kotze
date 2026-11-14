@@ -65,6 +65,17 @@ class RepairStepTests(unittest.TestCase):
         with self.assertRaisesRegex(step.Rejected, 'editable Python'):
             step.edit(self.request(path='tests/test_calc.py'), self.root)
 
+    def test_cannot_edit_nested_test_helpers_or_python_startup_hook(self):
+        (self.root / 'pkg').mkdir()
+        (self.root / 'pkg' / 'tests').mkdir()
+        (self.root / 'pkg' / 'tests' / 'helpers.py').write_text('value = 0\n')
+        (self.root / 'sitecustomize.py').write_text('value = 0\n')
+        for path in ('pkg/tests/helpers.py', 'sitecustomize.py'):
+            with self.subTest(path=path):
+                with self.assertRaisesRegex(step.Rejected, 'editable Python'):
+                    step.edit(self.request(path=path, old='value = 0',
+                                           new='value = 1'), self.root)
+
     def test_cannot_follow_symlink(self):
         (self.root / 'calc.py').unlink()
         (self.root / 'calc.py').symlink_to(self.root / 'tests/test_calc.py')
@@ -114,6 +125,25 @@ class HostEditScopeTests(unittest.TestCase):
     def test_only_source_change_is_allowed(self):
         (self.worker / 'calc.py').write_text('after\n')
         hc.enforce_edit_scope(self.source, self.worker, set(), 'calc.py')
+
+    def test_no_op_worker_candidate_cannot_be_published(self):
+        with self.assertRaisesRegex(hc.Refused, 'did not change'):
+            hc.enforce_edit_scope(self.source, self.worker, set(), 'calc.py')
+
+    def test_removed_source_cannot_be_published(self):
+        (self.worker / 'calc.py').unlink()
+        with self.assertRaisesRegex(hc.Refused, 'vanished'):
+            hc.enforce_edit_scope(self.source, self.worker, set(), 'calc.py')
+
+    def test_nested_test_helper_cannot_be_scoped(self):
+        for root in (self.source, self.worker):
+            (root / 'pkg').mkdir()
+            (root / 'pkg' / 'tests').mkdir()
+            (root / 'pkg' / 'tests' / 'helpers.py').write_text('assert True\n')
+        (self.worker / 'pkg' / 'tests' / 'helpers.py').write_text('assert False\n')
+        with self.assertRaisesRegex(hc.Refused, 'Invalid single-file'):
+            hc.enforce_edit_scope(self.source, self.worker, set(),
+                                  'pkg/tests/helpers.py')
 
     def test_test_forgery_is_detected_by_host(self):
         (self.worker / 'calc.py').write_text('after\n')
@@ -309,6 +339,20 @@ class AgentLoopTests(unittest.TestCase):
                               return_value={'proposal': self.message('submit')}):
                 with patch.object(agent.hc, 'run_worker') as run:
                     with self.assertRaisesRegex(agent.Rejected, 'Cannot submit'):
+                        agent.run(self.args)
+                    run.assert_not_called()
+
+    def test_model_cannot_edit_python_startup_hook_even_after_inspection(self):
+        (self.source / 'sitecustomize.py').write_text('value = 0\n')
+        actions = [self.message('inspect', path='sitecustomize.py'),
+                   self.message('edit_test', path='sitecustomize.py',
+                                old='value = 0', new='value = 1')]
+        with patch.object(agent.hc, 'protected_paths',
+                          return_value=({}, {}, 'synthetic', set())):
+            with patch.object(agent, '_model',
+                              side_effect=lambda _args, step, _prompt: {'proposal': actions[step - 1]}):
+                with patch.object(agent.hc, 'run_worker') as run:
+                    with self.assertRaisesRegex(agent.Rejected, 'not editable'):
                         agent.run(self.args)
                     run.assert_not_called()
 
