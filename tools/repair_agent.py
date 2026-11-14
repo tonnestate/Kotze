@@ -418,8 +418,9 @@ def run(args: argparse.Namespace) -> dict:
                 arm=args.arm, source=current, expected_source_sha256=source_sha,
                 scratch=args.scratch, publish_parent=args.publish_parent,
                 output_name=output_name,
-                argv=['/usr/bin/python3', '-I', '-B', '-c', script,
-                      json.dumps(sandbox_action, ensure_ascii=True, separators=(',', ':'))],
+                argv=['/usr/bin/python3', '-I', '-B', '-c', script],
+                stdin_data=json.dumps(sandbox_action, ensure_ascii=True,
+                                      separators=(',', ':')).encode('utf-8'),
                 worker_uid=args.worker_uid, worker_gid=args.worker_gid,
                 timeout=args.worker_timeout, capture_report=True,
                 allowed_changed_path=action['path'])
