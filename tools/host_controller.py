@@ -252,13 +252,16 @@ def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
                publish_parent: Path, output_name: str, argv: list[str],
                worker_uid: int, worker_gid: int, timeout: int = 120,
                capture_report: bool = False,
-               allowed_changed_path: str | None = None) -> dict:
+               allowed_changed_path: str | None = None,
+               stdin_data: bytes | None = None) -> dict:
     if os.name != 'posix' or sys.platform != 'linux':
         raise Refused('Linux namespace sandbox required')
     bwrap = trusted_bwrap_path()
     require_worker_identity(worker_uid, worker_gid)
     if arm not in ('BASE', 'SKILL') or type(timeout) is not int or not 1 <= timeout <= 300:
         raise Refused('Invalid arm or worker timeout')
+    if stdin_data is not None and (type(stdin_data) is not bytes or len(stdin_data) > 16384):
+        raise Refused('Worker stdin payload must be bytes and no larger than 16 KiB')
     if not output_name or output_name in ('.', '..') or '/' in output_name or '\\' in output_name:
         raise Refused('Output name must be one plain path component')
     if len(expected_source_sha256) != 64 or any(c not in '0123456789abcdef' for c in expected_source_sha256):
@@ -303,15 +306,20 @@ def run_worker(*, trusted: Path, manifest: Path, task_id: str, arm: str,
             resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
         try:
             with stdout.open('wb') as out, stderr.open('wb') as err:
-                proc = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
-                                        close_fds=True, start_new_session=True, preexec_fn=limits,
-                                        user=worker_uid, group=worker_gid, extra_groups=[],
-                                        env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'})
+                proc = subprocess.Popen(
+                    command, stdin=(subprocess.PIPE if stdin_data is not None else subprocess.DEVNULL),
+                    stdout=out, stderr=err, close_fds=True, start_new_session=True,
+                    preexec_fn=limits, user=worker_uid, group=worker_gid, extra_groups=[],
+                    env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'})
                 try:
-                    status = proc.wait(timeout=timeout)
+                    if stdin_data is not None:
+                        proc.communicate(input=stdin_data, timeout=timeout)
+                        status = proc.returncode
+                    else:
+                        status = proc.wait(timeout=timeout)
                 except subprocess.TimeoutExpired:
                     os.killpg(proc.pid, signal.SIGKILL)
-                    proc.wait()
+                    proc.communicate()
                     raise Refused('Worker timed out; no candidate published')
         except OSError as exc:
             raise Refused('Worker process or sandbox failed to start') from exc
