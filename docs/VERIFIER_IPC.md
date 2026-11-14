@@ -22,9 +22,9 @@ No production installation or service manager is included in this draft. The ser
 
 ## Evidence from this implementation
 
-- 13/13 local test cases passed: exact request shape, forged actor/path rejection, malformed and overlong requests, read deadlines, stable receipt-bound event IDs, actual local AF_UNIX client/server transport and SO_PEERCRED queries.
+- 14/14 local test cases passed: exact request shape, forged actor/path rejection, duplicate JSON keys, malformed and overlong requests, read deadlines, stable receipt-bound event IDs, actual local AF_UNIX client/server transport and SO_PEERCRED queries.
 - In an ephemeral root-capable Linux test fixture, a verifier subprocess UID 65534/GID 65534 successfully requested admission while worker UID 1 was rejected, **even when assigned the socket's allowed GID 65534**. The fixture used a **synthetic bridge**, not the production receipt/C11 implementation. This is kernel IPC boundary evidence only.
-- The GitHub source blob hashes for the new service/client/tests match the locally tested bytes. The full repository test matrix and actual C11 native-event integration have not been run here.
+- The GitHub source blob hashes for the new service/client/tests and standalone synthetic host fixture match the locally tested bytes. The full repository test matrix and actual C11 native-event integration have not been run here.
 
 ## Unresolved gates
 
@@ -35,4 +35,4 @@ No production installation or service manager is included in this draft. The ser
 5. Existing descriptor snapshot sealing is not full filesystem immutability. Live Bubblewrap isolation, full hostile worker tests, verified end-to-end reducer admission, and performance profiling remain pending.
 6. This implementation runs a long-lived Python UDS service but still calls the native C11 executable per admitted event. It does not claim throughput or latency improvements.
 
-Local-only regression: python3 -m unittest discover -s tests -p test_verifier_service.py -v; full local check: make check. No GitHub Actions, main merge, deployment, external model call or paid execution.
+Local-only regression: python3 -m unittest discover -s tests -p test_verifier_service.py -v; optional Linux root-only synthetic OS-peer fixture: python3 tests/live_peercred_fixture.py --verifier-uid 65534 --verifier-gid 65534 --worker-uid 1 (only where those distinct OS accounts exist). The fixture uses a private randomly named root-owned directory below /srv and substitutes a synthetic receipt/C11 bridge. Full local check: make check. No GitHub Actions, main merge, deployment, external model call or paid execution.
