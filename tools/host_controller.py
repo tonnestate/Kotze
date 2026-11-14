@@ -207,18 +207,46 @@ def enforce_edit_scope(source: Path, workspace: Path, excluded: set[Path],
     """Only the explicitly selected source path may change in this sandbox step.
 
     This is an independent host-side check; worker-controlled test output cannot
-    authorize changing fixture or test bytes. Empty directory additions are not
-    represented by the legacy file-tree digest and require later verification.
+    authorize changing fixture or test bytes. The full stable tree must change;
+    unrelated files and directories may not change. This policy is only for
+    one existing Python source file, never tests or runtime hooks.
     """
     if type(allowed_changed_path) is not str:
         raise Refused('Invalid single-file edit scope')
     allowed = Path(allowed_changed_path)
     if (not allowed_changed_path or allowed.is_absolute()
-            or any(part in ('', '.', '..', '.git') for part in allowed.parts)
+            or any(part in ('', '.', '..', '.git', '__pycache__', 'tests')
+                   for part in allowed.parts)
+            or not allowed_changed_path.endswith('.py')
+            or allowed.name.startswith('test_')
+            or allowed.name in ('conftest.py', 'sitecustomize.py', 'usercustomize.py')
             or str(allowed) != allowed_changed_path
             or allowed in excluded
             or any(parent in excluded for parent in allowed.parents)):
         raise Refused('Invalid single-file edit scope')
+    # Resolve the selected existing file through O_NOFOLLOW directory handles.
+    # A deleted, substituted or hard-linked target cannot be accepted.
+    for tree in (source, workspace):
+        parentfd = os.open(tree, os.O_RDONLY | os.O_DIRECTORY |
+                           os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            for component in allowed.parts[:-1]:
+                childfd = os.open(component, os.O_RDONLY | os.O_DIRECTORY |
+                                  os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parentfd)
+                os.close(parentfd)
+                parentfd = childfd
+            selected = os.open(allowed.parts[-1], os.O_RDONLY |
+                               os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parentfd)
+            try:
+                info = os.fstat(selected)
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                    raise Refused('Selected source is not a regular single-link file')
+            finally:
+                os.close(selected)
+        except OSError as exc:
+            raise Refused('Selected source file vanished or was substituted') from exc
+        finally:
+            os.close(parentfd)
     others = frozenset(excluded | {allowed})
     try:
         before_other = secure_snapshot.tree(source, excluded=others)
@@ -227,6 +255,13 @@ def enforce_edit_scope(source: Path, workspace: Path, excluded: set[Path],
         raise Refused('Edit scope snapshot rejected') from exc
     if before_other != after_other:
         raise Refused('Worker modified files outside authorized source path')
+    try:
+        before_full = secure_snapshot.tree(source, excluded=frozenset(excluded))
+        after_full = secure_snapshot.tree(workspace, excluded=frozenset(excluded))
+    except secure_snapshot.SnapshotError as exc:
+        raise Refused('Changed source snapshot rejected') from exc
+    if before_full == after_full:
+        raise Refused('Worker did not change the authorized source')
 
 
 def worker_command(bwrap: str, workspace: Path, argv: list[str]) -> list[str]:
