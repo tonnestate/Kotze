@@ -372,6 +372,7 @@ class AgentLoopTests(unittest.TestCase):
 
     def test_model_cannot_edit_python_startup_hook_even_after_inspection(self):
         (self.source / 'sitecustomize.py').write_text('value = 0\n')
+        self.study_task['source_tree_sha256'] = hc.digest_tree(self.source)
         actions = [self.message('inspect', path='sitecustomize.py'),
                    self.message('edit_test', path='sitecustomize.py',
                                 old='value = 0', new='value = 1')]
