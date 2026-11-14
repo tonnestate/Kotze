@@ -400,6 +400,10 @@ def run(args: argparse.Namespace) -> dict:
                     'initial_tree_sha256': initial_sha, 'candidate_tree_sha256': source_sha,
                     'candidate': str(current), 'c11_handoff': handoff,
                     'verified': False, 'steps': trail}
+        requested = Path(action['path'])
+        if ('tests' in requested.parts or requested.name.startswith('test_')
+                or requested.name in ('conftest.py', 'sitecustomize.py', 'usercustomize.py')):
+            raise Rejected('Test and Python startup-hook sources are not editable')
         _path(current, action['path'], hidden)
         if action['path'] not in inspected:
             raise Rejected('An exact source inspection is required before editing')
