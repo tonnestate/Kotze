@@ -20,6 +20,28 @@ import subprocess
 import sys
 import tempfile
 
+def _trusted_tool_imports() -> None:
+    """No writable plugin directory may be imported by a root host controller."""
+    if __name__ == '__main__' and sys.flags.isolated != 1:
+        raise SystemExit('REPAIR_LOOP_REFUSED: trusted host requires python3 -I')
+    if sys.flags.isolated != 1:
+        return  # Pure offline unit-test imports run without host privileges.
+    base = Path(__file__).absolute().parent
+    for name in ('repair_agent.py', 'repair_step.py', 'gemma_worker.py',
+                 'host_controller.py', 'secure_snapshot.py'):
+        target = base / name
+        current = Path('/')
+        for part in target.parts[1:]:
+            current = current / part
+            info = current.lstat()
+            if info.st_uid != 0 or info.st_mode & 0o022 or stat.S_ISLNK(info.st_mode):
+                raise SystemExit('REPAIR_LOOP_REFUSED: untrusted host tools installation')
+        if not target.is_file():
+            raise SystemExit('REPAIR_LOOP_REFUSED: installed tool module absent')
+    sys.path.insert(0, str(base))
+
+
+_trusted_tool_imports()
 import gemma_worker as gm
 import host_controller as hc
 import repair_step
