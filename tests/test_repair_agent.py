@@ -133,11 +133,11 @@ class WorkIdentityTests(unittest.TestCase):
         self.db = Path(self.temp.name) / 'control.sqlite'
         self.task = {'base_sha': 'baseline', 'oracle_sha256': 'private-oracle-hash'}
         with sqlite3.connect(self.db) as conn:
-            conn.execute('CREATE TABLE works(id TEXT,state TEXT,mode TEXT,base_sha TEXT,oracle_hash TEXT)')
-            conn.execute("INSERT INTO works VALUES('w','REPAIRING','AUTO','baseline','private-oracle-hash')")
+            conn.execute('CREATE TABLE works(id TEXT,state TEXT,mode TEXT,base_sha TEXT,oracle_hash TEXT,revision INTEGER)')
+            conn.execute("INSERT INTO works VALUES('w','REPAIRING','AUTO','baseline','private-oracle-hash',3)")
 
     def test_exact_repair_work_identity(self):
-        agent.validate_work_identity(self.db, 'w', self.task)
+        self.assertEqual(agent.validate_work_identity(self.db, 'w', self.task), 3)
 
     def test_mismatched_source_and_oracle_denied(self):
         for row in ({'base_sha': 'wrong', 'oracle_sha256': 'private-oracle-hash'},
