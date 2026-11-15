@@ -52,6 +52,7 @@ check: build/test-core build/test-trajectory build/test-register build/test-asyn
 	python3 -m unittest discover -s tests -p "test_navigation.py" -v
 	python3 -m unittest discover -s tests -p "test_native_navigation.py" -v
 	python3 -m unittest discover -s tests -p "test_verified_skills.py" -v
+	python3 -m unittest discover -s tests -p "test_verified_sft.py" -v
 	python3 -m unittest discover -s tests -p "test_trajectory_monitor.py" -v
 	python3 -m unittest discover -s tests -p "test_integration_units.py" -v
 # Live end-to-end acceptance A-J: root, Linux, Bubblewrap and two dedicated OS
