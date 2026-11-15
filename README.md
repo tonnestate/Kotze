@@ -1,5 +1,8 @@
 # KOTZE Harness — Native C11 Control Core (Phase 1)
 
+**Native Code Intelligence integration:** [C11 symbol graph, bounded asynchronous readers, 120-line source navigation, O(1) trajectory advice and verifier-gated procedural memory](docs/NATIVE_CODE_INTELLIGENCE.md) are now wired into the host repair loop, with explicitly pinned native libraries. An owner-approved, local-only SFT export prepares future LoRA experiments. No extra controller, model router or required runtime dependency is introduced. Full native/privileged runtime testing is still required before operational claims.
+
+
 **Gemma 4 Kaggle competition entry:** [build, test and submit instructions](docs/KAGGLE_SUBMISSION.md). The declarative `submission/` package and standalone `notebooks/KOTZE_Kaggle_Submission.ipynb` are separate from the C11 host-side repair harness. The package has offline structural tests; independent Kaggle Gemma repair-rate validation remains outstanding.
 
 The repository contains the first **C11/SQLite control-plane implementation** of KOTZE Harness. The library is language-agnostic and persists work identity, original requirements, event-driven finite-state transitions, repair candidates, verifier-bound outcome claims, enumerated hypotheses, action-budget reservations, anti-repeat decisions, and verified-success records.
