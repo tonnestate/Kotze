@@ -19,6 +19,30 @@ Outputs:
 
 Only Python's standard library is required to build the ZIP or notebook. The structural unit tests additionally use PyYAML to parse `agent.yaml`.
 
+## One-task development evaluation (organizer runtime required)
+
+The new `tools/evaluate_submission.py` is an optional local **single-task** runner for `swegemma eval`. It is not part of the competition ZIP and does not introduce a deployment dependency.
+
+With the organizer's `swegemma` wheelhouse, public `tasks.jsonl`, repository snapshots, and model endpoint available:
+
+```bash
+python3 tools/evaluate_submission.py \
+  --tasks /path/to/tasks.jsonl \
+  --snapshots-dir /path/to/snapshots \
+  --task-id YOUR_PUBLIC_INSTANCE_ID \
+  --results-dir /path/to/new-results
+```
+
+This defaults to preflight only and launches **no model**, network request or evaluation. Add `--execute` to launch exactly the specified public task. The runner defaults to the organizer's Docker sandbox. `--sandbox subprocess` is supported when Docker is unavailable, but executes repository code with less isolation; use only a disposable, trusted development environment.
+
+A missing CLI, task, snapshot or conflicting results directory returns JSON `BLOCKED` with exit code 77. An actual evaluation writes the organizer's `summary.json` and `task_results.jsonl` under the results directory. A completed process is **not** itself counted as a verified solved task; use the organizer's verification results. No CI, model or hosted test job is started by `make check-public-eval`.
+
+```bash
+make check-public-eval
+```
+
+These tests exercise preflight, argument safety, task selection, failure handling and results parsing with synthetic offline data; they do not measure Gemma repair quality. The competition acceptance, model score and benchmark improvement remain unverified until a real organizer evaluation.
+
 ## Kaggle use
 
 1. Accept the competition rules by the entry deadline, **25 November 2026**.
