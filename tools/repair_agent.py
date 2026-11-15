@@ -30,7 +30,7 @@ def _trusted_tool_imports() -> None:
         return  # Pure offline unit-test imports run without host privileges.
     base = Path(__file__).absolute().parent
     for name in ('repair_agent.py', 'repair_step.py', 'gemma_worker.py',
-                 'host_controller.py', 'secure_snapshot.py'):
+                 'host_controller.py', 'secure_snapshot.py', 'turn_assurance.py'):
         target = base / name
         current = Path('/')
         for part in target.parts[1:]:
