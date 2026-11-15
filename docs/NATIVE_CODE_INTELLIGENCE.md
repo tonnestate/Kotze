@@ -7,8 +7,9 @@ This change consolidates [PR #17](https://github.com/tonnestate/Kotze/pull/17) a
 From a current, trusted Linux checkout with C11 compiler, SQLite3 headers and pthread support:
 
 ```bash
-make all
-make check
+make all          # existing lightweight core build
+make native       # native register, pthread readers and trajectory libraries
+make check        # native + Python + existing offline regression tests
 ```
 
 The build produces `build/kotze-core`, `build/libkotze-navigation.a`, `build/libkotze-navigation.so` and `build/libkotze-trajectory.so`. The offline test target builds and executes `build/test-register`, `build/test-async`, the existing C11 trajectory regression, and new Python navigation/memory/SFT tests. No Actions, GPU, or online services are needed.
