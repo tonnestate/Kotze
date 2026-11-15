@@ -11,15 +11,29 @@ build/kotze-core: src/main.c src/kotze.c include/kotze.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) src/main.c src/kotze.c -o $@ $(LDLIBS)
 build/test-core: tests/test_core.c src/kotze.c include/kotze.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_core.c src/kotze.c -o $@ $(LDLIBS)
+build/kotze-register.o: src/kotze_register.c include/kotze_register.h | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -c src/kotze_register.c -o $@
+build/kotze-async.o: src/kotze_async.c include/kotze_async.h include/kotze_register.h | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -pthread -c src/kotze_async.c -o $@
+build/libkotze-navigation.a: build/kotze-register.o build/kotze-async.o
+	ar rcs $@ build/kotze-register.o build/kotze-async.o
+build/libkotze-navigation.so: build/kotze-register.o build/kotze-async.o
+	$(CC) -shared -pthread -o $@ build/kotze-register.o build/kotze-async.o $(LDLIBS)
+build/test-register: tests/test_register.c src/kotze.c src/kotze_register.c include/kotze.h include/kotze_register.h | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_register.c src/kotze.c src/kotze_register.c -o $@ $(LDLIBS)
+build/test-async: tests/test_async.c src/kotze.c src/kotze_register.c src/kotze_async.c include/kotze.h include/kotze_register.h include/kotze_async.h | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) -pthread tests/test_async.c src/kotze.c src/kotze_register.c src/kotze_async.c -o $@ $(LDLIBS) -pthread
 build/test-trajectory: tests/test_trajectory.c src/kotze_trajectory.c include/kotze_trajectory.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_trajectory.c src/kotze_trajectory.c -o $@
 build/bench-trajectory: bench/trajectory_bench.c src/kotze_trajectory.c include/kotze_trajectory.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) bench/trajectory_bench.c src/kotze_trajectory.c -o $@
 bench-trajectory: build/bench-trajectory
 	./build/bench-trajectory
-check: build/test-core build/test-trajectory build/kotze-core
+check: build/test-core build/test-trajectory build/test-register build/test-async build/libkotze-navigation.so build/kotze-core
 	./build/test-core
 	./build/test-trajectory
+	./build/test-register
+	./build/test-async
 	python3 -m unittest discover -s tests -p "test_skill_grader.py" -v
 	python3 -m unittest discover -s tests -p "test_gemma_worker.py" -v
 	python3 -m unittest discover -s tests -p "test_verification_bridge.py" -v
@@ -33,6 +47,7 @@ check: build/test-core build/test-trajectory build/kotze-core
 	python3 -m unittest discover -s tests -p "test_verifier_service.py" -v
 	python3 -m unittest discover -s tests -p "test_repair_agent.py" -v
 	python3 -m unittest discover -s tests -p "test_turn_assurance.py" -v
+	python3 -m unittest discover -s tests -p "test_navigation.py" -v
 	python3 -m unittest discover -s tests -p "test_integration_units.py" -v
 # Live end-to-end acceptance A-J: root, Linux, Bubblewrap and two dedicated OS
 # accounts required; reports BLOCKED (exit 77) instead of mocking isolation.
