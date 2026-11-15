@@ -31,7 +31,7 @@ def _trusted_tool_imports() -> None:
     base = Path(__file__).absolute().parent
     for name in ('repair_agent.py', 'repair_step.py', 'gemma_worker.py',
                  'host_controller.py', 'secure_snapshot.py', 'turn_assurance.py',
-                 'native_navigation.py'):
+                 'native_navigation.py', 'trajectory_monitor.py'):
         target = base / name
         current = Path('/')
         for part in target.parts[1:]:
@@ -50,6 +50,7 @@ import host_controller as hc
 import secure_snapshot
 import repair_step
 import native_navigation as native_nav
+import trajectory_monitor as trajectory_native
 from turn_assurance import (TurnAssuranceError, compact_observations,
                             ensure_no_unresolved_actions, offered_actions)
 
@@ -627,6 +628,27 @@ def run(args: argparse.Namespace) -> dict:
             navigator = native_nav.NativeNavigator(navigation_library, args.db, args.work_id)
         except (native_nav.NavigationError, OSError) as exc:
             raise Rejected('Native navigation unavailable: ' + str(exc)) from exc
+    trajectory = None
+    if getattr(args, 'trajectory_lib', None) is not None:
+        try:
+            trajectory = trajectory_native.TrajectoryMonitor(args.trajectory_lib)
+        except (native_nav.NavigationError, OSError) as exc:
+            if navigator is not None:
+                navigator.close()
+            raise Rejected('Native trajectory unavailable: ' + str(exc)) from exc
+
+    def observed(action_key: str, evidence: str | None = None,
+                 *, completion_claim: bool = False) -> None:
+        if trajectory is None:
+            return
+        advice = trajectory.observe(action=action_key, snapshot=source_sha,
+                                    evidence=evidence,
+                                    host_observed=not completion_claim,
+                                    completion_claim=completion_claim)
+        if advice != 'CONTINUE':
+            metrics['trajectory_advisories'] = metrics.get('trajectory_advisories', 0) + 1
+            observations.append('HOST TRAJECTORY ADVISORY: ' + advice +
+                                ' (not an authorization or verifier result)')
 
     def reject(step: int, reason: str, **extra) -> None:
         metrics['rejected_steps'] += 1
@@ -694,6 +716,7 @@ def run(args: argparse.Namespace) -> dict:
                 read_id = reserve_action(args, 'READ', step, fingerprint)
                 metrics['c11_action_reservations'] += 1
                 finish_action(args, read_id, 'READ:' + gm.digest(result_text))
+                observed(fingerprint, gm.digest(result_text))
                 observations.append('NATIVE SYMBOL '+action['symbol']+' (UNTRUSTED CODE MAP):\n'+result_text)
                 trail.append({'step': step, 'action': 'locate_symbol', 'symbol': action['symbol'],
                               'matches': len(locations), 'snapshot_sha256': source_sha,
@@ -712,12 +735,14 @@ def run(args: argparse.Namespace) -> dict:
                 read_id = reserve_action(args, 'READ', step, fingerprint)
                 metrics['c11_action_reservations'] += 1
                 finish_action(args, read_id, 'READ:' + gm.digest(source))
+                observed(fingerprint, gm.digest(source))
                 inspected.add(action['path'])
                 observations.append('INSPECT ' + action['path'] + ' (UNTRUSTED SOURCE):\n' + source)
                 trail.append({'step': step, 'action': action['action'], 'path': action['path'],
                               'snapshot_sha256': source_sha, 'c11_action': read_id})
                 continue
             if action['action'] == 'submit':
+                observed(fingerprint, completion_claim=True)
                 if not (had_edit and last_test_pass and last_candidate is not None):
                     reject(step, 'Cannot submit without a changed candidate and passing public tests')
                     continue
@@ -823,6 +848,7 @@ def run(args: argparse.Namespace) -> dict:
             source_sha = stage['candidate_tree_sha256']
             had_edit = had_edit or changed
             last_candidate = current
+            observed(fingerprint, stage['candidate_tree_sha256'])
             last_test_pass = bool(changed and report['status'] == 'PUBLIC_TESTS_PASS'
                                   and type(report.get('public_test_count')) is int
                                   and report['public_test_count'] > 0)
@@ -861,6 +887,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument('--model', default=None)
     p.add_argument('--navigation-lib', type=Path, default=None,
                    help='Trusted C11 register/async .so; absent keeps legacy file navigation')
+    p.add_argument('--trajectory-lib', type=Path, default=None,
+                   help='Trusted C11 O(1) host observation library; advisory only')
     p.add_argument('--skill-file', type=Path, default=None)
     p.add_argument('--allow-remote', action='store_true')
     p.add_argument('--allow-domain-upload', action='store_true')
