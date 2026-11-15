@@ -38,7 +38,7 @@ def _trusted_tool_path() -> None:
     base = Path(__file__).absolute().parent
     for name in ('repair_pipeline.py', 'repair_agent.py', 'repair_step.py', 'gemma_worker.py',
                  'host_controller.py', 'secure_snapshot.py', 'turn_assurance.py',
-                 'native_navigation.py', 'confidential_grader.py',
+                 'native_navigation.py', 'verified_skills.py', 'confidential_grader.py',
                  'skill_grader.py', 'verifier_client.py'):
         current = Path('/')
         for part in (base / name).parts[1:]:
@@ -50,6 +50,7 @@ def _trusted_tool_path() -> None:
 
 
 _trusted_tool_path()
+import verified_skills as skills
 import repair_agent as agent  # noqa: E402  (also re-checks its own imports)  # performs the trusted-installation import check
 import confidential_grader as cg
 import gemma_worker as gm
@@ -321,6 +322,41 @@ def run(cfg: dict) -> dict:
     consistent = None
     if receipt is not None:
         consistent = (s['state'], s['verification_state']) == expected_final[receipt['state']]
+    # Verifier-gated procedural memory: no model/public-test claims.
+    # A synthetic/scripted acceptance must never become a learned model skill.
+    verified_skill = {'status': 'NOT_ELIGIBLE'}
+    if (consistent is True and s['state'] == 'COMPLETED'
+            and s['verification_state'] == 'PASS'
+            and repair is not None and repair.get('status') == 'UNVERIFIED_CANDIDATE_READY'
+            and cfg.get('provider', 'ollama') != gm.SCRIPTED_PROVIDER):
+        receipt_ref = 'sha256:' + _sha(sg.canonical(receipt))
+        environment_digest = _sha(_canon({
+            'schema': 'kotze.skill-environment.v1',
+            'protocol': task['case_protocol'],
+            'python': [sys.version_info.major, sys.version_info.minor],
+            'sandbox': 'bubblewrap',
+        }))
+        try:
+            candidate = cfg['publish_parent'] / ('sha256-' + s['candidate_sha'])
+            record = skills.procedure(
+                original=cfg['source'], candidate=candidate,
+                steps=repair.get('steps', []), work_id=wid,
+                candidate_sha=s['candidate_sha'], receipt_ref=receipt_ref)
+            proc_sha = _private_write(evidence_dir / 'verified-procedure.json', record)
+            native = core.run('success-add', wid, 'python.repair.singlefile.v1',
+                              environment_digest, receipt_ref)
+            if native.returncode:
+                verified_skill = {'status': 'C11_REFUSED',
+                                  'reason': native.stderr.strip()[:200]}
+            else:
+                verified_skill = {
+                    'status': 'RECORDED', 'procedure_sha256': proc_sha,
+                    'procedure_ref': str(evidence_dir / 'verified-procedure.json'),
+                    'receipt_ref': receipt_ref, 'environment_digest': environment_digest,
+                    'reuse_approved': False, 'training_approved': False,
+                }
+        except (skills.SkillError, OSError, UnicodeError) as exc:
+            verified_skill = {'status': 'NOT_EXTRACTED', 'reason': str(exc)[:200]}
     timings['total_seconds'] = clock() - started
     timings['c11_cli_calls_pipeline'] = core.calls
     timings['c11_cli_seconds_pipeline'] = core.seconds
@@ -332,6 +368,7 @@ def run(cfg: dict) -> dict:
         'baseline_reproduction': reproduction,
         'repair': repair, 'receipt': receipt,
         'receipt_sha256': _sha(sg.canonical(receipt)) if receipt else None,
+        'verified_skill': verified_skill,
         'verifier_ipc': verification, 'final_c11': s,
         'c11_events': events, 'c11_actions': actions,
         'final_state_agrees_with_independent_receipt': consistent,
