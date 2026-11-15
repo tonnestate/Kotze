@@ -37,7 +37,7 @@ def _trusted_tool_path() -> None:
         return
     base = Path(__file__).absolute().parent
     for name in ('repair_pipeline.py', 'repair_agent.py', 'repair_step.py', 'gemma_worker.py',
-                 'host_controller.py', 'secure_snapshot.py', 'confidential_grader.py',
+                 'host_controller.py', 'secure_snapshot.py', 'turn_assurance.py', 'confidential_grader.py',
                  'skill_grader.py', 'verifier_client.py'):
         current = Path('/')
         for part in (base / name).parts[1:]:
