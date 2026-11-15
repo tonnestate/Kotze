@@ -3,8 +3,12 @@ CFLAGS ?= -std=c11 -O2 -Wall -Wextra -Werror -pedantic
 CPPFLAGS ?= -Iinclude -D_POSIX_C_SOURCE=200809L
 LDLIBS ?= -lsqlite3
 
-.PHONY: all check clean bench-trajectory acceptance check-submission check-public-eval submission notebook
-all: build/kotze-core build/libkotze-navigation.so build/libkotze-trajectory.so
+.PHONY: all native check-native check clean bench-trajectory acceptance check-submission check-public-eval submission notebook
+all: build/kotze-core
+native: build/libkotze-navigation.so build/libkotze-trajectory.so
+check-native: native build/test-register build/test-async
+	./build/test-register
+	./build/test-async
 build:
 	mkdir -p build
 build/kotze-core: src/main.c src/kotze.c include/kotze.h | build
