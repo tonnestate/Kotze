@@ -188,7 +188,7 @@ class NativeNavigator:
                     continue
                 raw = os.read(fd, MAX_SOURCE_BYTES + 1)
                 after = os.fstat(fd)
-                if (len(raw) > MAX_SOURCE_BYTES or
+                if (len(raw) != before.st_size or len(raw) > MAX_SOURCE_BYTES or
                         (before.st_dev, before.st_ino, before.st_size,
                          before.st_mtime_ns, before.st_ctime_ns) !=
                         (after.st_dev, after.st_ino, after.st_size,
