@@ -177,7 +177,10 @@ class NativeNavigator:
                                              C.byref(rev), C.byref(epoch)),
                     "work identity")
         self._revision, self._epoch = rev.value, epoch.value
-        namespace = snapshot[:20]
+        if (type(snapshot) is not str or len(snapshot) != 64 or
+                any(ch not in "0123456789abcdef" for ch in snapshot)):
+            raise NavigationError("Untrusted source snapshot identity")
+        namespace = snapshot  # 64 + ':' + 40 = 105 bytes, fits C11 object_key[129]
         files: list[tuple[str, str, bytes]] = []
         symbol_rows: list[tuple[str, str, str, int, tuple[str, ...]]] = []
         for path in paths[:80]:
