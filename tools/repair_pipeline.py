@@ -194,10 +194,48 @@ def load_config(path: Path) -> dict:
             if type(path) is not str or not path.startswith('/'):
                 raise PipelineError(key + ' must be an absolute trusted library path')
             cfg[key] = Path(path)
+    if cfg.get('skill_file') is not None:
+        if type(cfg['skill_file']) is not str or not cfg['skill_file'].startswith('/'):
+            raise PipelineError('skill_file must be an absolute trusted path')
+        cfg['skill_file'] = Path(cfg['skill_file'])
     for key in ('original_request', 'contract_text'):
         if type(cfg.get(key)) is not str or not cfg[key].strip():
             raise PipelineError(f'Missing {key}')
     return cfg
+
+
+def resolve_pinned_skill(cfg: dict, study: dict, arm: str) -> Path | None:
+    """Reenable the existing SKILL arm only for owner-pinned private evidence.
+
+    The chosen skill is advisory and remains subordinate to the C11 work
+    contract. Neither a worker nor a model may select or change this path.
+    """
+    candidate = cfg.get('skill_file')
+    if arm == 'BASE':
+        if candidate is not None:
+            raise PipelineError('BASE arm must never load a learned skill')
+        return None
+    if arm != 'SKILL':
+        raise PipelineError('Unsupported skill study arm')
+    if not isinstance(candidate, Path) or not candidate.is_absolute():
+        raise PipelineError('SKILL arm requires a pinned host-private skill file')
+    try:
+        canonical = candidate.resolve(strict=True)
+        trusted = cfg['trusted'].resolve(strict=True)
+        if (candidate != canonical or candidate.is_symlink()
+                or not candidate.is_file() or not hc.within(canonical, trusted)):
+            raise PipelineError('SKILL file is outside trusted root or not canonical')
+        info = candidate.stat()
+        if (info.st_uid != os.geteuid() or info.st_nlink != 1
+                or info.st_mode & 0o077 or info.st_size > gm.PROMPT_LIMIT):
+            raise PipelineError('SKILL file is not a private host-owned regular file')
+        digest = gm.digest(gm.read_prompt(candidate))
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise PipelineError('Cannot read approved pinned skill') from exc
+    if (not isinstance(study.get('skill_sha256'), str)
+            or study['skill_sha256'] != digest):
+        raise PipelineError('SKILL does not match frozen study manifest digest')
+    return candidate
 
 
 def request_verification(cfg: dict) -> dict:
@@ -267,6 +305,7 @@ def run(cfg: dict) -> dict:
     task = sg.task_of(study, cfg['task_id'])
     arm = cfg.get('arm', 'BASE')
     cfg['arm'] = arm
+    skill_file = resolve_pinned_skill(cfg, study, arm)
 
     # 1. Registered work: immutable original request + contract, AUTO mode.
     t0 = clock()
@@ -331,7 +370,7 @@ def run(cfg: dict) -> dict:
             scratch=cfg['scratch'], publish_parent=cfg['publish_parent'], db=cfg['db'],
             core_bin=cfg['core_bin'], task_id=cfg['task_id'], work_id=wid, arm=arm,
             event_prefix=prefix, provider=cfg.get('provider', 'ollama'),
-            model=cfg.get('model'), skill_file=None,
+            model=cfg.get('model'), skill_file=skill_file,
             allow_remote=bool(cfg.get('allow_remote', False)),
             allow_domain_upload=bool(cfg.get('allow_domain_upload', False)),
             worker_uid=cfg['worker_uid'], worker_gid=cfg['worker_gid'],

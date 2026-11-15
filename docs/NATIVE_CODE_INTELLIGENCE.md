@@ -41,6 +41,27 @@ After independent verifier acceptance **and** C11 `COMPLETED/PASS` for a non-scr
 
 The record is **never automatically approved** for another model, external upload or training. It has `approved_for_reuse=false` and `approved_for_training=false`. A normal worker or a passing public test cannot promote its own output. Synthetic/scripted acceptance is explicitly excluded from learned capability records. FruitStack's MangoMe can later index the returned evidence reference instead of copying a second skill database.
 
+## Reusing an approved skill in the actual repair pipeline
+
+The trusted end-to-end `repair_pipeline.py` can now pass a **host-selected, private, manifest-pinned skill** to the already-existing `SKILL` repair arm. Earlier pipeline versions always passed `skill_file=None`, which blocked SKILL trials through this entrypoint even though `repair_agent.py` and `gemma_worker.py` already supported them.
+
+For an owner-approved procedure, the host must prepare a small (at most 64 KiB), private, UTF-8 **advisory skill text** under the KOTZE trusted root, owned by the privileged host and mode `0600`. Never directly admit a model-generated procedure as independently verified or reusable. MangoMe / the trusted study owner selects and approves the content.
+
+Freeze its exact UTF-8 SHA-256 digest in the already accepted private study manifest as `skill_sha256`, then select the preexisting `SKILL` arm and provide the additional private pipeline-config field:
+
+```json
+{
+  "arm": "SKILL",
+  "skill_file": "/absolute/trusted/root/approved-skill.txt"
+}
+```
+
+This is an **additional field on the existing pipeline configuration**, not a replacement for its full required schema. For a `BASE` run, omit `skill_file` entirely.
+
+`repair_pipeline.resolve_pinned_skill()` now rejects: BASE runs with a skill, missing SKILL paths, symlinks, out-of-root paths, changed SHA-256, oversized files, files writable by other users and untrusted ownership. The repair-agent preflight independently rechecks the path; the model bridge includes advisory skill text **after** the original request and accepted contract; the agent rechecks the digest between turns. This never bypasses C11 authority, the sandbox, or the confidential verifier. A separate approved learning artifact is not automatically applied to another task.
+
+`tests/test_pinned_skill_pipeline.py` provides five offline regression cases for those boundaries. Full Linux host integration remains unverified, as does any measured change in repair success.
+
 ## Optional, offline learning-data export
 
 `tools/export_verified_sft.py` can produce one SFT JSONL example from a verified procedure for future LoRA work, but only when the host explicitly passes `--approve-source-export` and a **separate** private owner approval file:
