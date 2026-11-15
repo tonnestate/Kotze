@@ -55,6 +55,8 @@ check: build/test-core build/test-trajectory build/test-register build/test-asyn
 	python3 -m unittest discover -s tests -p "test_turn_assurance.py" -v
 	python3 -m unittest discover -s tests -p "test_navigation.py" -v
 	python3 -m unittest discover -s tests -p "test_native_navigation.py" -v
+	python3 -m unittest discover -s tests -p "test_native_async_recovery.py" -v
+	python3 -m unittest discover -s tests -p "test_verified_skill_replay.py" -v
 	python3 -m unittest discover -s tests -p "test_verified_skills.py" -v
 	python3 -m unittest discover -s tests -p "test_verified_sft.py" -v
 	python3 -m unittest discover -s tests -p "test_trajectory_monitor.py" -v
