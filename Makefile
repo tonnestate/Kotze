@@ -3,7 +3,7 @@ CFLAGS ?= -std=c11 -O2 -Wall -Wextra -Werror -pedantic
 CPPFLAGS ?= -Iinclude -D_POSIX_C_SOURCE=200809L
 LDLIBS ?= -lsqlite3
 
-.PHONY: all check clean bench-trajectory acceptance check-submission submission notebook
+.PHONY: all check clean bench-trajectory acceptance check-submission check-public-eval submission notebook
 all: build/kotze-core
 build:
 	mkdir -p build
@@ -39,6 +39,9 @@ acceptance: build/kotze-core
 	python3 tests/e2e/acceptance.py --provision-accounts
 check-submission:
 	python3 -m unittest discover -s tests -p 'test_submission_package.py' -v
+	python3 -m unittest discover -s tests -p 'test_evaluate_submission.py' -v
+check-public-eval:
+	python3 -m unittest discover -s tests -p 'test_evaluate_submission.py' -v
 submission:
 	python3 tools/build_submission.py
 notebook: submission
