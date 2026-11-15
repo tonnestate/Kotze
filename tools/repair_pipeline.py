@@ -105,6 +105,29 @@ def _private_write(path: Path, data: object) -> str:
     return _sha(raw)
 
 
+def _private_write_verified(path: Path, data: object) -> str:
+    """Write once; accept only an identical, host-owned private replay.
+
+    A crash between writing the procedure and registering its C11 success may
+    leave the file behind. Never overwrite it, or treat different bytes as the
+    same independently verified procedure.
+    """
+    raw = json.dumps(data, sort_keys=True, indent=2, ensure_ascii=True).encode() + b'\n'
+    digest = _sha(raw)
+    try:
+        return _private_write(path, data)
+    except FileExistsError:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        with os.fdopen(fd, 'rb') as existing:
+            info = os.fstat(existing.fileno())
+            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                    or info.st_uid != os.geteuid() or info.st_mode & 0o077
+                    or info.st_size != len(raw)
+                    or existing.read(len(raw) + 1) != raw):
+                raise PipelineError('Conflicting or unsafe existing verified procedure')
+        return digest
+
+
 class Core:
     """Thin trusted wrapper over the native reducer CLI with call accounting."""
 
@@ -360,7 +383,7 @@ def run(cfg: dict) -> dict:
                 original=cfg['source'], candidate=candidate,
                 steps=repair.get('steps', []), work_id=wid,
                 candidate_sha=s['candidate_sha'], receipt_ref=receipt_ref)
-            proc_sha = _private_write(evidence_dir / 'verified-procedure.json', record)
+            proc_sha = _private_write_verified(evidence_dir / 'verified-procedure.json', record)
             native = core.run('success-add', wid, 'python.repair.singlefile.v1',
                               environment_digest, receipt_ref)
             if native.returncode:
