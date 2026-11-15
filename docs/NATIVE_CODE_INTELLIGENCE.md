@@ -60,6 +60,16 @@ python3 tools/export_verified_sft.py \
 
 The exporter rechecks the C11 success record, `COMPLETED/PASS` state, candidate digest, exact receipt hash and independent verifier-origin event. It creates a private output with `O_EXCL`, never overwrites an existing file, and has **no network, upload, GPU training or model inference**. Source code in the diff and request can be confidential; do not export without explicit authorization.
 
+## Hardening after initial integration (15 November 2026)
+
+The first merged native integration needed three correctness fixes:
+
+- The verified-success environment fingerprint formerly read the nonexistent `task['case_protocol']` key. It now uses the **actually validated** `runner` and optional `timeout_seconds` from the frozen task manifest, together with Python version and sandbox identity. Successful non-scripted repairs no longer fail here with a `KeyError`.
+- Native symbol queries previously waited for outgoing and incoming edges sequentially, wasting the two-reader pool. Both C11 read tickets are now submitted **before** either wait. A timed-out read is canceled and reaped, preventing queue-slot leakage. Submitted siblings are canceled on partial submission failure.
+- Private verified-procedure writes are now replay-safe **only for the identical owner-protected bytes**. Divergent, symlinked or non-private files still fail closed. This does not by itself recover a fully interrupted, already-completed host process; that needs a separate trusted reconciliation operation.
+
+The regression files `test_native_async_recovery.py` and `test_verified_skill_replay.py` are included in `make check`. Isolated helper/ABI smoke checks run locally; complete original repository and privileged Linux host acceptance are still pending. No Kaggle evaluation was started.
+
 ## Scope and evidence boundaries
 
 - KOTZE continues to be a **specialized coding runtime**. FruitStack's PeachMe/PomeloMe adapter is the external effect boundary; CherryMe/PlumMe can organize multiple specialist models upstream without a duplicate KOTZE multi-agent authority. The Kaggle submission remains a separate single-Gemma declarative artifact.
