@@ -76,7 +76,9 @@ def procedure(*, original: Path, candidate: Path, steps: list[dict],
     if (not isinstance(work_id, str) or not work_id or
             not isinstance(candidate_sha, str) or len(candidate_sha) != 64 or
             any(ch not in "0123456789abcdef" for ch in candidate_sha) or
-            not isinstance(receipt_ref, str) or not receipt_ref.startswith("sha256:")):
+            not isinstance(receipt_ref, str) or len(receipt_ref) != 71 or
+            not receipt_ref.startswith("sha256:") or
+            any(ch not in "0123456789abcdef" for ch in receipt_ref[7:])):
         raise SkillError("Unbound verified skill evidence")
     edited = []
     for entry in steps:
