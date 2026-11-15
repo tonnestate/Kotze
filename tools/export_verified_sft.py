@@ -28,6 +28,9 @@ def export(db: Path, procedure_path: Path, approval_path: Path, output: Path) ->
     for candidate in (db, procedure_path, approval_path):
         if candidate.is_symlink() or not candidate.is_file():
             raise ExportDenied("Required trusted input is missing or symlinked")
+        info = candidate.stat()
+        if info.st_uid != os.geteuid() or info.st_mode & 0o022:
+            raise ExportDenied("Trusted SFT input must be owned by host and not writable by others")
     if output.exists() or output.is_symlink() or not output.is_absolute():
         raise ExportDenied("SFT output must be a new absolute file")
     if not output.parent.is_dir() or output.parent.is_symlink():
