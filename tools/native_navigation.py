@@ -118,6 +118,7 @@ def _bind(lib):
                              C.c_char_p, C.c_uint, C.POINTER(C.c_uint64)], C.c_int),
         "ka_wait": ([C.c_void_p, C.c_uint64, C.c_uint,
                      C.POINTER(Result)], C.c_int),
+        "ka_cancel": ([C.c_void_p, C.c_uint64], C.c_int),
         "ka_reap": ([C.c_void_p, C.c_uint64], C.c_int),
     }
     for name, (args, result) in defs.items():
@@ -249,9 +250,16 @@ class NativeNavigator:
     def _wait(self, ticket):
         result = Result()
         status = self.lib.ka_wait(self.pool, ticket.value, 5000, C.byref(result))
-        self.lib.ka_reap(self.pool, ticket.value)
-        if status != 0 or result.register_status != 0:
-            raise NavigationError("Native async cursor was stale or unavailable")
+        if status != 0:
+            # A timed-out read may still be queued/running. Cancel and reap
+            # its ticket so repeated model lookups cannot exhaust 32 slots.
+            self.lib.ka_cancel(self.pool, ticket.value)
+            self.lib.ka_reap(self.pool, ticket.value)
+            raise NavigationError("Native async read timed out or was canceled")
+        if self.lib.ka_reap(self.pool, ticket.value) != 0:
+            raise NavigationError("Native async ticket could not be reaped")
+        if result.register_status != 0:
+            raise NavigationError("Native cursor was stale or unavailable")
         return result
 
     def locate(self, name: str) -> list[dict]:
@@ -271,19 +279,30 @@ class NativeNavigator:
             entry = self._wait(ticket).entry
             result = {"symbol": name, "source_ref": entry.source_ref.decode(),
                       "relations": []}
-            # All edges are read by dedicated query-only C11 reader threads.
-            for direction in (1, 2):
-                ticket = C.c_uint64()
-                if self.lib.ka_submit_edges(self.pool, C.byref(cursor),
-                                             direction, None, 16,
-                                             C.byref(ticket)) != 0:
-                    raise NavigationError("Native edge queue unavailable")
-                found = self._wait(ticket)
-                for i in range(found.edge_count):
-                    result["relations"].append({
-                        "direction": "outgoing" if direction == 1 else "incoming",
-                        "kind": found.edges[i].relation.decode(),
-                        "key": found.edges[i].object_key.decode(),
-                    })
+            # Schedule both independent edge directions before waiting, so
+            # the native pthread readers can actually execute concurrently.
+            tickets = []
+            try:
+                for direction in (1, 2):
+                    ticket = C.c_uint64()
+                    if self.lib.ka_submit_edges(self.pool, C.byref(cursor),
+                                                 direction, None, 16,
+                                                 C.byref(ticket)) != 0:
+                        raise NavigationError("Native edge queue unavailable")
+                    tickets.append((direction, ticket))
+                for direction, ticket in tickets:
+                    found = self._wait(ticket)
+                    for i in range(found.edge_count):
+                        result["relations"].append({
+                            "direction": "outgoing" if direction == 1 else "incoming",
+                            "kind": found.edges[i].relation.decode(),
+                            "key": found.edges[i].object_key.decode(),
+                        })
+            except BaseException:
+                # Cleanup is idempotent if a ticket was already reaped by _wait.
+                for _, ticket in tickets:
+                    self.lib.ka_cancel(self.pool, ticket.value)
+                    self.lib.ka_reap(self.pool, ticket.value)
+                raise
             results.append(result)
         return results
