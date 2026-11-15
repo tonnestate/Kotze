@@ -38,7 +38,8 @@ def _trusted_tool_path() -> None:
     base = Path(__file__).absolute().parent
     for name in ('repair_pipeline.py', 'repair_agent.py', 'repair_step.py', 'gemma_worker.py',
                  'host_controller.py', 'secure_snapshot.py', 'turn_assurance.py',
-                 'native_navigation.py', 'verified_skills.py', 'confidential_grader.py',
+                 'native_navigation.py', 'trajectory_monitor.py', 'verified_skills.py',
+                 'confidential_grader.py',
                  'skill_grader.py', 'verifier_client.py'):
         current = Path('/')
         for part in (base / name).parts[1:]:
@@ -144,11 +145,12 @@ def load_config(path: Path) -> dict:
             raise PipelineError(f'Config {key} must be a positive integer')
     if cfg['verifier_uid'] == cfg['worker_uid']:
         raise PipelineError('Verifier and worker OS identities must differ')
-    if cfg.get('navigation_lib') is not None:
-        path = cfg['navigation_lib']
-        if type(path) is not str or not path.startswith('/'):
-            raise PipelineError('navigation_lib must be an absolute trusted library path')
-        cfg['navigation_lib'] = Path(path)
+    for key in ('navigation_lib', 'trajectory_lib'):
+        if cfg.get(key) is not None:
+            path = cfg[key]
+            if type(path) is not str or not path.startswith('/'):
+                raise PipelineError(key + ' must be an absolute trusted library path')
+            cfg[key] = Path(path)
     for key in ('original_request', 'contract_text'):
         if type(cfg.get(key)) is not str or not cfg[key].strip():
             raise PipelineError(f'Missing {key}')
@@ -293,7 +295,8 @@ def run(cfg: dict) -> dict:
             max_steps=cfg.get('max_steps', 6), model_timeout=cfg.get('model_timeout', 120),
             worker_timeout=cfg.get('worker_timeout', 120), max_tokens=cfg.get('max_tokens', 1536),
             script_file=Path(cfg['script_file']) if cfg.get('script_file') else None,
-            transcript_dir=transcript, navigation_lib=cfg.get('navigation_lib'))
+            transcript_dir=transcript, navigation_lib=cfg.get('navigation_lib'),
+            trajectory_lib=cfg.get('trajectory_lib'))
         t0 = clock()
         try:
             repair = agent.run(ns)
