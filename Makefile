@@ -48,6 +48,7 @@ check: build/test-core build/test-trajectory build/test-register build/test-asyn
 	python3 -m unittest discover -s tests -p "test_repair_agent.py" -v
 	python3 -m unittest discover -s tests -p "test_turn_assurance.py" -v
 	python3 -m unittest discover -s tests -p "test_navigation.py" -v
+	python3 -m unittest discover -s tests -p "test_native_navigation.py" -v
 	python3 -m unittest discover -s tests -p "test_integration_units.py" -v
 # Live end-to-end acceptance A-J: root, Linux, Bubblewrap and two dedicated OS
 # accounts required; reports BLOCKED (exit 77) instead of mocking isolation.
