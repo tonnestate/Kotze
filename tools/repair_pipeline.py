@@ -75,6 +75,26 @@ def _canon(data: object) -> bytes:
     return json.dumps(data, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode()
 
 
+def skill_environment_digest(task: dict) -> str:
+    """Fingerprint only fields present in the validated frozen study contract.
+
+    A verified repair must remain recoverable after grading. The earlier
+    reference to task['case_protocol'] was not part of that contract and caused
+    a KeyError precisely on the successful, non-scripted learning path.
+    """
+    runner = task.get('runner')
+    if (not isinstance(runner, list) or not runner
+            or any(type(part) is not str or not part for part in runner)):
+        raise PipelineError('Skill environment requires the validated task runner')
+    return _sha(_canon({
+        'schema': 'kotze.skill-environment.v2',
+        'runner': runner,
+        'timeout_seconds': task.get('timeout_seconds', 60),
+        'python': [sys.version_info.major, sys.version_info.minor],
+        'sandbox': 'bubblewrap',
+    }))
+
+
 def _private_write(path: Path, data: object) -> str:
     raw = json.dumps(data, sort_keys=True, indent=2, ensure_ascii=True).encode() + b'\n'
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
@@ -333,12 +353,7 @@ def run(cfg: dict) -> dict:
             and repair is not None and repair.get('status') == 'UNVERIFIED_CANDIDATE_READY'
             and cfg.get('provider', 'ollama') != gm.SCRIPTED_PROVIDER):
         receipt_ref = 'sha256:' + _sha(sg.canonical(receipt))
-        environment_digest = _sha(_canon({
-            'schema': 'kotze.skill-environment.v1',
-            'protocol': task['case_protocol'],
-            'python': [sys.version_info.major, sys.version_info.minor],
-            'sandbox': 'bubblewrap',
-        }))
+        environment_digest = skill_environment_digest(task)
         try:
             candidate = cfg['publish_parent'] / ('sha256-' + s['candidate_sha'])
             record = skills.procedure(
